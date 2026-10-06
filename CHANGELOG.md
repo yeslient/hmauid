@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- The package keeps the id it carried before the rename, `hma-uidfake`, so this installs over 0.4.0
+  instead of beside it. Only the id and the name in `module.prop` went back; everything the module
+  itself carries -- the netlink family, the module parameters, the name the ko files are built under,
+  the tool it pairs with -- is still `tosya`, which is what 0.5.0 renamed them to, and the tool and
+  the module still have to come from the same build. No update URL: there is nothing to check
+  against.
+- `module.prop`'s fallback version is 0.5.0/5000 instead of 0.1.0/1000. A source tree without a git
+  tag used to build a package the manager reads as older than 0.4.0.
+
 ## 0.5.0
 
 - Nothing a build produces is published. A tag run reserves one message in the chat and builds every ko

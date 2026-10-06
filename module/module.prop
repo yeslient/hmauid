@@ -1,7 +1,10 @@
-id=tosya
-name=Tosya
+id=hma-uidfake
+name=HMA UID Fake
 # Fallback only: the build replaces these two with the git tag and the short hash.
-version=0.1.0
-versionCode=1000
+# It has to stay above what it installs over: with the old 0.1.0/1000 a tree
+# without a tag built a package that the manager reads as older than 0.4.0 and
+# refuses to install.
+version=0.5.0
+versionCode=5000
 author=Grachevskaya
 description=Тося. She answers as if she were never installed. Advanced users only; no support.
