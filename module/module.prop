@@ -1,0 +1,7 @@
+id=tosya
+name=Tosya
+# Fallback only: the build replaces these two with the git tag and the short hash.
+version=0.1.0
+versionCode=1000
+author=Grachevskaya
+description=Тося. She answers as if she were never installed. Advanced users only; no support.

@@ -1,0 +1,18 @@
+# build outputs live in the CMake build directory; these are just safety nets
+*.o
+*.ko
+*.cmd
+*.symversions
+Module.symvers
+modules.order
+build/
+out/
+dist/
+
+# Scratch space for local analysis; nothing here belongs in a commit.
+.scratch/
+/build*/
+.pi
+
+# Local agent workspace: review notes, downloaded headers for syntax checks.
+.workbuddy/

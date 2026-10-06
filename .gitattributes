@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# The module and build scripts run on Linux (CI and device); a CRLF in a shell
+# script is a syntax error there, so every text file is stored with LF.
+*.sh text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.yml text eol=lf
+*.prop text eol=lf
