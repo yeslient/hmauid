@@ -130,6 +130,14 @@ jobs:
             "out/${{ matrix.kmi }}_arm64_tosya.ko"
           NM="/opt/ddk/clang/${{ matrix.clang }}/bin/llvm-nm" \
             bash scripts/check-undefined.sh out/*.ko
+      # The release channel is the Telegram album; this keeps a copy where a build
+      # that is not a release can still be picked up from.
+      - name: Upload this ko
+        uses: actions/upload-artifact@v4
+        with:
+          name: ko-${{ matrix.kmi }}
+          path: out/*.ko
+          if-no-files-found: error
       - name: Write this ko into its slot, and say which file it became
         id: write
         if: startsWith(github.ref, 'refs/tags/v') && needs.reserve.outputs.message_id != '' && needs.reserve.outputs.message_id != '0'
@@ -228,3 +236,50 @@ jobs:
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageMedia" | head -c 200
           echo
           echo "package ${stamp} written into slot 9 (message ${SLOT9})"
+
+  # The same package the release writes, built from the ko files this run produced
+  # rather than from the ones Telegram is holding. Without it a push that is not a
+  # release builds eight modules and then throws all of them away.
+  package:
+    name: module zip
+    runs-on: ubuntu-latest
+    needs: lkm
+    if: needs.lkm.result == 'success'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Collect the eight ko files from this run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ko-*
+          path: build/ko
+          merge-multiple: true
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nlohmann-json3-dev
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+          local-cache: false
+      - name: Pack the module from those ko files
+        run: |
+          set -euo pipefail
+          ls -l build/ko
+          cmake -S . -B build \
+            -DUG_NDK="${{ steps.ndk.outputs.ndk-path }}" \
+            -DUG_USE_PREBUILT_KO=ON \
+            -DUG_VERSION_OVERRIDE="0.5.0+ci.${{ github.run_number }}" \
+            -DUG_VERSION_CODE_OVERRIDE="$((5000 + ${{ github.run_number }}))"
+          cmake --build build -j"$(nproc)"
+          ls -la build/dist
+      - name: Upload the module
+        uses: actions/upload-artifact@v4
+        with:
+          name: tosya-module-zip
+          path: build/dist/*.zip
+          if-no-files-found: error
