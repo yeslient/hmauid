@@ -290,6 +290,14 @@ void Syncer::sync_now(std::string_view why) {
     users_refused_ = false;
     Log::info("user list readable again");
   }
+  /* A user appearing or leaving changes which /data/user/<u> parents exist.
+   * The names END re-resolves them; this covers the window where the users
+   * changed and the names did not. */
+  if (users_seen_ && *users_seen_ != users->size() && names_pushed_) {
+    if (!netlink_.refresh())
+      watcher_.arm_retry();
+  }
+  users_seen_ = users->size();
 
   const auto opened = open_rules(*file, *packages);
   if (!opened) {
@@ -299,6 +307,12 @@ void Syncer::sync_now(std::string_view why) {
   Rules *rules = opened->rules.get();
   const Presets &presets = opened->presets;
   Pairs pairs = rules->expand(*packages, presets);
+
+  /* The names records fold to app ids on the kernel side (a record's caller is
+   * taken modulo the user span), so the guard is built from the pairs before
+   * the per-user expansion: one record covers every user. */
+  const Pairs base_pairs = pairs;
+  pairs = expand_users(pairs, *users);
 
   /* The rules are per package, so every user answers
    * for its own uids. */
@@ -353,8 +367,8 @@ void Syncer::sync_now(std::string_view why) {
 
     std::set<std::pair<std::uint32_t, std::string>> seen;
     std::vector<HiddenName> names;
-    names.reserve(pairs.size());
-    for (const auto &pair : pairs) {
+    names.reserve(base_pairs.size());
+    for (const auto &pair : base_pairs) {
       const auto ns = names_of_uid.find(pair.target);
       if (ns == names_of_uid.end())
         continue;

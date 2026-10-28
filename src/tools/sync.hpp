@@ -104,6 +104,8 @@ private:
    * config does not re-send it. */
   std::vector<HiddenName> pushed_names_;
   bool names_pushed_ = false;
+  /* The user count the last names push ran with, for the refresh above. */
+  std::optional<std::size_t> users_seen_;
   using ApkId = std::pair<std::uint32_t, std::uint64_t>;
   enum class ApkPhase { Confirmed, Adding, Dropping };
   struct PublishedApk {
