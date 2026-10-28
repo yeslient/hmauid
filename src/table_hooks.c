@@ -13,9 +13,10 @@
 #include "kaux.h"
 #include "tier.h"
 
-#define ARG_UID 0 /* find_user(kuid_t uid): uid in x0 */
-#define ARG_WHO \
-	1 /* getpriority/setpriority/ioprio_get/ioprio_set: (which, who, ...) */
+// find_user(kuid_t uid): uid in x0
+#define ARG_UID 0
+// getpriority/setpriority/ioprio_get/ioprio_set: (which, who, ...)
+#define ARG_WHO 1
 
 #define NR32_GETPRIORITY 96
 #define NR32_SETPRIORITY 97
@@ -29,8 +30,11 @@
 #define TOSYA_NR32_SETRESUID 208
 #define TOSYA_NR32_SETRESGID 210
 
-#define TOSYA_TABLE_SCAN \
-	512 /* the largest arm64 table, 64-bit or 32-bit, is ~450 */
+struct tosya_args {
+	u64 regs[3];
+};
+// the largest arm64 table, 64-bit or 32-bit, is ~450
+#define TOSYA_TABLE_SCAN 512
 
 static tosya_syscall_t *g_uid_table;
 static tosya_syscall_t *g_uid_ctable;
@@ -48,10 +52,9 @@ struct hook_entry { // NOLINT(clang-analyzer-optin.performance.Padding)
 	 * implementations for the syscalls this module cares about -- unistd32.h maps
 	 * getpriority to sys_getpriority and so on -- but through its own table, so
 	 * the value to look for is the address the 64-bit table held, not a name and
-	 * not a number. Names are what this replaced: the numbers this module used to
-	 * carry (141 for getpriority) were not even the 32-bit ones (96), and on a
-	 * device where the 32-bit table has no such entry at all there is nothing to
-	 * find and nothing is hooked.
+	 * not a number. The numbers carried per syscall (141 for getpriority) are not
+	 * even the 32-bit ones (96), and on a device where the 32-bit table has no such
+	 * entry at all there is nothing to find and nothing is hooked.
 	 */
 	int native;
 	/*
@@ -62,7 +65,7 @@ struct hook_entry { // NOLINT(clang-analyzer-optin.performance.Padding)
 	 * of the two its kernel has.
 	 */
 	const char *sym32;
-	/* the 64-bit sibling of a fallback entry, when native is -1 */
+	// the 64-bit sibling of a fallback entry, when native is -1
 	struct hook_entry *ally;
 };
 static struct hook_entry g_hook[];
@@ -74,17 +77,15 @@ static struct hook_entry g_cset[];
 
 static tosya_syscall_t *find_slot(tosya_syscall_t *table, struct hook_entry *e)
 {
-	/* tosya_lookup() gives the spelling a table holds -- the jump-table entry
-	 * before 6.1 and the plain symbol from there on, which is the rule KernelSU
-	 * resolves a functable hook with; the other spelling is accepted too. */
-	/*
+	/* tosya_sym() gives the spelling a table holds -- the jump-table entry
+	 * before 6.1 and the plain symbol from there on; the other spelling is accepted
+	 * too.
+	 *
 	 * Every way the same syscall can be named in a table: the 64-bit
 	 * implementation, the entry's own symbol in both spellings, and the compat
-	 * wrapper under both of its names in both spellings. KernelSU and its forks
-	 * do not cover 32-bit callers at all -- they return early for a compat task
-	 * and never touch compat_sys_call_table -- so there is no method to follow
-	 * here; what is left is to accept everything a kernel might have put there
-	 * and patch the one that is actually in the table.
+	 * wrapper under both of its names in both spellings. Nothing covers 32-bit
+	 * callers elsewhere, so what is left is to accept everything a kernel might have
+	 * put there and patch the one that is in the table.
 	 */
 	unsigned long want[8];
 	unsigned int nwant = 0, i;
@@ -101,7 +102,7 @@ static tosya_syscall_t *find_slot(tosya_syscall_t *table, struct hook_entry *e)
 		want[nwant++] = (unsigned long)e->ally->orig;
 	}
 	if (e->sym) {
-		want[nwant++] = tosya_lookup(e->sym);
+		want[nwant++] = tosya_sym(e->sym);
 		want[nwant++] = tosya_lookup_raw(e->sym);
 	}
 	if (e->sym32) {
@@ -112,10 +113,10 @@ static tosya_syscall_t *find_slot(tosya_syscall_t *table, struct hook_entry *e)
 		const char *pfx = strstr(e->sym32, "__arm64_");
 		const char *alt = pfx ? pfx + strlen("__arm64_") : NULL;
 
-		want[nwant++] = tosya_lookup(e->sym32);
+		want[nwant++] = tosya_sym(e->sym32);
 		want[nwant++] = tosya_lookup_raw(e->sym32);
 		if (alt) {
-			want[nwant++] = tosya_lookup(alt);
+			want[nwant++] = tosya_sym(alt);
 			want[nwant++] = tosya_lookup_raw(alt);
 		}
 	}
@@ -125,7 +126,7 @@ static tosya_syscall_t *find_slot(tosya_syscall_t *table, struct hook_entry *e)
 	if (!found)
 		return NULL;
 
-	/* the number is only the first guess, and only when it agrees */
+	// the number is only the first guess, and only when it agrees
 	if (e->nr < TOSYA_TABLE_SCAN) {
 		for (i = 0; i < nwant; i++) {
 			if (want[i] && table[e->nr] == (tosya_syscall_t)want[i])
@@ -284,22 +285,16 @@ static asmlinkage long __nocfi uid_hook(const struct pt_regs *regs,
 					unsigned int which_user,
 					tosya_syscall_t orig)
 {
-	struct pt_regs args;
+	struct tosya_args args;
 	u64 who;
 	u32 repl;
 
-	if (unlikely(!orig))
-		return -ENOSYS;
+	args.regs[0] = regs->regs[0];
+	args.regs[1] = regs->regs[1];
+	args.regs[2] = regs->regs[2];
 	if ((u32)regs->regs[0] != which_user)
 		return orig(regs);
 
-	/*
-	 * The whole frame is copied, not the three words this module reads: the
-	 * original syscall is written against struct pt_regs, and a shorter object
-	 * leaves sp, pc, pstate and the argument registers behind it holding
-	 * whatever the caller's stack had there.
-	 */
-	args = *regs;
 	/*
 	 * The argument is read and the replacement is selected unconditionally: the same
 	 * instructions either way, so there is no branch for a predictor to learn and no
@@ -308,7 +303,7 @@ static asmlinkage long __nocfi uid_hook(const struct pt_regs *regs,
 	who = regs->regs[ARG_WHO];
 	repl = policy_query((u32)who);
 	args.regs[ARG_WHO] = tosya_select((u64)repl, who, repl);
-	return orig(&args);
+	return orig((const struct pt_regs *)&args);
 }
 static asmlinkage long uid_change_hook(const struct pt_regs *regs,
 				       tosya_syscall_t orig)
@@ -318,8 +313,6 @@ static asmlinkage long uid_change_hook(const struct pt_regs *regs,
 				 (before % 100000u) >= TOSYA_APP_MIN;
 	long ret;
 
-	if (unlikely(!orig))
-		return -ENOSYS;
 	if (interesting && tosya_tag_isset())
 		return orig(regs);
 
@@ -416,7 +409,7 @@ asmlinkage long tosya32_setresgid(const struct pt_regs *regs)
 }
 static int uid_tables_install(void)
 {
-	unsigned long table = tosya_lookup("sys_call_table");
+	unsigned long table = tosya_sym("sys_call_table");
 	unsigned int n, n_compat = 0;
 
 	if (!table)
@@ -425,7 +418,7 @@ static int uid_tables_install(void)
 	 * devices. */
 	if (TOSYA_DEBUG_ON())
 		pr_info("tosya: sys_call_table=%px locator check: find_user=%px linked=%px\n",
-			(void *)table, (void *)tosya_lookup("find_user"),
+			(void *)table, (void *)tosya_sym("find_user"),
 			(void *)find_user);
 
 	tosya_status_set_hooks_expected(ARRAY_SIZE(g_hook),
@@ -446,19 +439,17 @@ static int uid_tables_install(void)
 	tosya_status_set_hooks(n, 0);
 
 #ifdef CONFIG_COMPAT
-	table = tosya_lookup("compat_sys_call_table");
+	table = tosya_sym("compat_sys_call_table");
 	if (table) {
 		g_uid_ctable = (tosya_syscall_t *)table;
 		n_compat = patch_entries(g_uid_ctable, g_chook,
 					 ARRAY_SIZE(g_chook), false);
-		/*
-		 * n is the 64-bit count and stays it: the status line has two
-		 * fields and the compat count is the second one.
-		 */
+		if (n_compat != ARRAY_SIZE(g_chook))
+			n = n_compat;
 		pr_warn("tosya: %u of %u 32-bit entr(ies) hooked; the rest are not in this kernel's 32-bit table\n",
-			n_compat, (unsigned)ARRAY_SIZE(g_chook));
+			n, (unsigned)ARRAY_SIZE(g_chook));
 		pr_info("tosya: %u uid syscall(s) hooked in compat_sys_call_table\n",
-			n_compat);
+			n);
 		tosya_status_set_hooks(n, n_compat);
 	}
 #endif
@@ -476,17 +467,10 @@ static void uid_tables_remove(void)
 		g_uid_ctable = NULL;
 	}
 #endif
-	/*
-	 * A task can be inside one of these wrappers when the entries are put
-	 * back, and the wrapper reads the address it has to call: the wait is
-	 * what makes sure no call is still on its way to code this module is
-	 * about to give up.
-	 */
-	synchronize_rcu();
 }
 static int setuid_tables_install(void)
 {
-	unsigned long table = tosya_lookup("sys_call_table");
+	unsigned long table = tosya_sym("sys_call_table");
 	unsigned int n, c = 0;
 
 	if (!table)
@@ -503,7 +487,7 @@ static int setuid_tables_install(void)
 		n);
 
 #ifdef CONFIG_COMPAT
-	table = tosya_lookup("compat_sys_call_table");
+	table = tosya_sym("compat_sys_call_table");
 	if (table) {
 		g_set_ctable = (tosya_syscall_t *)table;
 		c = patch_entries(g_set_ctable, g_cset, ARRAY_SIZE(g_cset),
@@ -512,7 +496,7 @@ static int setuid_tables_install(void)
 			(unsigned)ARRAY_SIZE(g_cset));
 	}
 #endif
-	/* the counts a user reads are what is hooked: ten of ten here */
+	// the counts a user reads are what is hooked: ten of ten here
 	tosya_status_add_hooks_expected(ARRAY_SIZE(g_set),
 #ifdef CONFIG_COMPAT
 					g_set_ctable ? ARRAY_SIZE(g_cset) : 0
@@ -535,8 +519,6 @@ static void setuid_tables_remove(void)
 		g_set_ctable = NULL;
 	}
 #endif
-	/* see uid_tables_remove(): a wrapper may still be on its way out */
-	synchronize_rcu();
 }
 
 /* The two table mechanisms in the order (tiers.c): behind the inline copies, and

@@ -20,14 +20,14 @@ int tosya_inline_veneer(void *out, size_t out_size, unsigned long target,
 	if (((unsigned long)out | target) & (TOSYA_INLINE_INSN - 1))
 		return TOSYA_INLINE_EINSN;
 	if (landing) {
-		words[0] = 0xd50324dfu; /* BTI jc */
-		words[1] = 0x58000070u; /* LDR x16, PC + 12 */
-		words[2] = 0xd61f0200u; /* BR x16 */
-		words[3] = 0xd503201fu; /* NOP, align the literal */
+		words[0] = 0xd50324dfu; // BTI jc
+		words[1] = 0x58000070u; // LDR x16, PC + 12
+		words[2] = 0xd61f0200u; // BR x16
+		words[3] = 0xd503201fu; // NOP, align the literal
 		literal = 4;
 	} else {
-		words[0] = 0x58000050u; /* LDR x16, PC + 8 */
-		words[1] = 0xd61f0200u; /* BR x16 */
+		words[0] = 0x58000050u; // LDR x16, PC + 8
+		words[1] = 0xd61f0200u; // BR x16
 		literal = 2;
 	}
 	words[literal] = (unsigned int)target;
@@ -35,6 +35,22 @@ int tosya_inline_veneer(void *out, size_t out_size, unsigned long target,
 	memcpy(out, words, len);
 	return (int)len;
 }
+
+#ifdef __KERNEL__
+#include <linux/kernel.h>
+static void entry_complain(const char *why, size_t offset, unsigned int word)
+{
+	pr_info("tosya: entry refused: %s at +%zu, word 0x%08x\n", why, offset,
+		word);
+}
+#else
+static void entry_complain(const char *why, size_t offset, unsigned int word)
+{
+	(void)why;
+	(void)offset;
+	(void)word;
+}
+#endif
 
 static long entry_sx(unsigned int value, unsigned int bits)
 {
@@ -52,25 +68,37 @@ static int entry_displaceable(unsigned int word)
 {
 	if (entry_landing(word) || word == 0xd503201fu)
 		return 1;
-	/* Compiler SCS push: STR x30, [x18], #8; no other arbitrary store. */
+	// Single-register load/store with an unsigned immediate offset: the ordinary spill
+	// of one register to the frame. (str/ldr x|w, [sp|Xn, #imm])
+	if ((word & 0xffc00000u) == 0xf9000000u ||
+	    (word & 0xffc00000u) == 0xf9400000u ||
+	    (word & 0xffc00000u) == 0xb9000000u ||
+	    (word & 0xffc00000u) == 0xb9400000u)
+		return 1;
+	// The system instruction space: MRS/MSR, hints, barriers. Position independent and
+	// order preserving, so moving them with the rest of the frame setup changes nothing.
+	if ((word & 0xff000000u) == 0xd5000000u)
+		return 1;
+	// Compiler SCS push: STR x30, [x18], #8; no other arbitrary store.
 	if (word == 0xf800865eu)
 		return 1;
-	/* STP of two X registers relative to the kernel stack pointer. */
+	// STP of two X registers relative to the kernel stack pointer.
 	if ((word & 0xfe4003e0u) == 0xa80003e0u)
 		return 1;
-	/* Integer add/subtract immediate, including ordinary stack allocation. */
+	// Integer add/subtract immediate, including ordinary stack allocation.
 	if ((word & 0x1f000000u) == 0x11000000u)
 		return 1;
-	/* Integer logical/add/subtract register operations and MOV aliases. */
+	// Integer logical/add/subtract register operations and MOV aliases.
 	if ((word & 0x1f000000u) == 0x0a000000u ||
 	    (word & 0x1f000000u) == 0x0b000000u)
 		return 1;
-	/* MOVN/MOVZ/MOVK immediates. */
+	// MOVN/MOVZ/MOVK immediates.
 	return (word & 0x1f800000u) == 0x12800000u;
 }
 
 static int entry_body_safe(const unsigned int *src, size_t len,
-			   unsigned long from_va, size_t prefix)
+			   unsigned long from_va, size_t prefix,
+			   bool allow_indirect)
 {
 	size_t offset;
 	const unsigned long end = from_va + prefix;
@@ -81,6 +109,19 @@ static int entry_body_safe(const unsigned int *src, size_t len,
 		unsigned long target;
 		unsigned int bits = 0, field = 0;
 
+		/* An indirect branch keeps its destination in a register: there is no field here to
+		 * read and nothing to redirect, so a replay of it could carry a target this path never
+		 * wrote. Refused, the same way a branch back into the patch is. */
+		/*
+		 * An indirect branch keeps its destination in a register. Only the displaced prefix is
+		 * moved, so an indirect branch further down the function is not relocated and cannot land
+		 * inside the window unless something took the entry as an address -- which a caller that
+		 * asks for it accepts, because the stub is re-entrant: the name it rewrites is already the
+		 * mask on the second pass, so a replay changes nothing.
+		 */
+		if (!allow_indirect && ((word & 0xfffffc1fu) == 0xd61f0000u ||
+					(word & 0xfffffc1fu) == 0xd63f0000u))
+			return 0;
 		if ((word & 0x7c000000u) == 0x14000000u) {
 			bits = 26;
 			field = word & 0x03ffffffu;
@@ -107,7 +148,7 @@ static int entry_body_safe(const unsigned int *src, size_t len,
 			if (word & 0x80000000u) {
 				target = (pc & ~0xfffUL) +
 					 (unsigned long)(displacement * 4096);
-				/* An ADRP could be followed by any within-page add. */
+				// An ADRP could be followed by any within-page add.
 				if (target >= (from_va & ~0xfffUL) &&
 				    target <= ((end - 1) & ~0xfffUL))
 					return 0;
@@ -117,18 +158,22 @@ static int entry_body_safe(const unsigned int *src, size_t len,
 					return 0;
 			}
 		}
-		/* Cannot establish targets of BR/BLR or authenticated variants. */
-		if ((word & 0xfe000000u) == 0xd6000000u &&
-		    word != 0xd65f03c0u && word != 0xd65f0bffu &&
-		    word != 0xd65f0fffu)
-			return 0;
+		/*
+		 * An indirect branch is only a problem where it is moved: the displaced window
+		 * is the only code whose address changes, and entry_displaceable() already
+		 * refuses anything but the frame setup there. Elsewhere in the function a
+		 * BR/BLR is not relocated at all, and refusing the whole function for having
+		 * one -- a scheduler callback, a tracepoint, a jump table -- is what kept
+		 * ordinary functions out.
+		 */
 	}
 	return 1;
 }
 
 int tosya_inline_trampoline(void *out, size_t out_size, const void *from,
 			    unsigned long from_va, unsigned long to_va,
-			    size_t len, size_t patch_offset, size_t *out_len)
+			    size_t len, size_t patch_offset, size_t *out_len,
+			    bool allow_indirect)
 {
 	unsigned int scratch[TOSYA_INLINE_TRAMPOLINE_MAX / TOSYA_INLINE_INSN];
 	const unsigned int *src = from;
@@ -138,7 +183,7 @@ int tosya_inline_trampoline(void *out, size_t out_size, const void *from,
 
 	if (out_len)
 		*out_len = 0;
-	if (!out || !from || !len || len > TOSYA_INLINE_MAX_SOURCE ||
+	if (!out || !from || !len || len > TOSYA_INLINE_MAX_FUNC ||
 	    (patch_offset != 0 && patch_offset != TOSYA_INLINE_INSN) ||
 	    len <= prefix || out_size < prefix + TOSYA_INLINE_INSN)
 		return TOSYA_INLINE_ESIZE;
@@ -151,13 +196,30 @@ int tosya_inline_trampoline(void *out, size_t out_size, const void *from,
 	    (unsigned long)from <
 		    (unsigned long)out + prefix + TOSYA_INLINE_INSN)
 		return TOSYA_INLINE_EINSN;
-	if (entry_landing(src[0]) != (patch_offset == TOSYA_INLINE_INSN))
+	if (entry_landing(src[0]) != (patch_offset == TOSYA_INLINE_INSN)) {
+		entry_complain("entry is not the landing the veneer asked for",
+			       0, src[0]);
 		return TOSYA_INLINE_EINSN;
-	for (offset = 0; offset < prefix; offset += TOSYA_INLINE_INSN)
-		if (!entry_displaceable(src[offset / TOSYA_INLINE_INSN]))
+	}
+	for (offset = 0; offset < prefix; offset += TOSYA_INLINE_INSN) {
+		const unsigned int word = src[offset / TOSYA_INLINE_INSN];
+
+		if (!entry_displaceable(word)) {
+			entry_complain("instruction cannot be displaced",
+				       offset, word);
 			return TOSYA_INLINE_EINSN;
-	if (!entry_body_safe(src, len, from_va, prefix))
+		}
+	}
+	if (!entry_body_safe(src, len, from_va, prefix, allow_indirect)) {
+		size_t i;
+
+		for (i = 0; i < prefix / TOSYA_INLINE_INSN; ++i)
+			entry_complain("prefix word", i * TOSYA_INLINE_INSN,
+				       src[i]);
+		entry_complain("a pc-relative target leaves the moved window",
+			       0, 0);
 		return TOSYA_INLINE_EINSN;
+	}
 
 	rc = tosya_inline_relocate(scratch, sizeof(scratch), from, from_va,
 				   to_va, prefix, &written);

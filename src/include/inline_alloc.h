@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifndef UIDFAKE_INLINE_ALLOC_H
-#define UIDFAKE_INLINE_ALLOC_H
+#ifndef TOSYA_INLINE_ALLOC_H
+#define TOSYA_INLINE_ALLOC_H
 
 #include <linux/types.h>
 

@@ -20,13 +20,18 @@
  */
 #define TOSYA_INLINE_INSN 4u
 #define TOSYA_INLINE_MAX_SOURCE 1024u
+/* The largest function the relocator will take: kernel_clone is 1084 bytes, so this is the
+ * only number that had to move for it -- nothing else is sized from it but the work array. */
+#define TOSYA_INLINE_MAX_FUNC 2048u
 #define TOSYA_INLINE_MAX_COPY (TOSYA_INLINE_MAX_SOURCE * 4u + TOSYA_INLINE_INSN)
 
 #define TOSYA_INLINE_OK 0
-#define TOSYA_INLINE_ESIZE \
-	(-1) /* empty/oversize input or insufficient output */
-#define TOSYA_INLINE_EINSN (-2) /* unsupported encoding or unaligned input */
-#define TOSYA_INLINE_ERANGE (-3) /* a relative target cannot be represented */
+// empty/oversize input or insufficient output
+#define TOSYA_INLINE_ESIZE (-1)
+// unsupported encoding or unaligned input
+#define TOSYA_INLINE_EINSN (-2)
+// a relative target cannot be represented
+#define TOSYA_INLINE_ERANGE (-3)
 
 /*
  * @from and @to must be disjoint, instruction-aligned buffers. Addresses denote

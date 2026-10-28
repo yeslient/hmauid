@@ -36,12 +36,12 @@ static int resolve_allocators(void)
 {
 	if (g_alloc)
 		return 0;
-	g_ro = (void *)tosya_lookup("set_memory_ro");
-	g_x = (void *)tosya_lookup("set_memory_x");
-	g_flush = (void *)tosya_lookup("caches_clean_inval_pou");
+	g_ro = (void *)tosya_sym("set_memory_ro");
+	g_x = (void *)tosya_sym("set_memory_x");
+	g_flush = (void *)tosya_sym("caches_clean_inval_pou");
 	if (!g_flush)
-		g_flush = (void *)tosya_lookup("__flush_icache_range");
-	g_is_vmap = (void *)tosya_lookup("is_vmalloc_or_module_addr");
+		g_flush = (void *)tosya_sym("__flush_icache_range");
+	g_is_vmap = (void *)tosya_sym("is_vmalloc_or_module_addr");
 	if (!g_ro || !g_x || !g_flush || !g_is_vmap)
 		return -EOPNOTSUPP;
 
@@ -50,13 +50,13 @@ static int resolve_allocators(void)
 	 * supported near-allocation configuration yet. HW_TAGS/KASAN_VMALLOC
 	 * handle it within the native vmalloc path, as for module_alloc(). The
 	 * out-of-line shadow helpers exist only in the unsupported case. */
-	if (tosya_lookup("kasan_alloc_module_shadow") ||
-	    tosya_lookup("kasan_module_alloc"))
+	if (tosya_sym("kasan_alloc_module_shadow") ||
+	    tosya_sym("kasan_module_alloc"))
 		return -EOPNOTSUPP;
 
-	g_alloc = (void *)tosya_lookup("__vmalloc_node_range");
+	g_alloc = (void *)tosya_sym("__vmalloc_node_range");
 	if (!g_alloc)
-		g_alloc = (void *)tosya_lookup("__vmalloc_node_range_noprof");
+		g_alloc = (void *)tosya_sym("__vmalloc_node_range_noprof");
 	return g_alloc ? 0 : -EOPNOTSUPP;
 }
 
@@ -90,11 +90,9 @@ static void *try_range(unsigned long start, unsigned long end)
 	allocation = allocate_range(start, end);
 	if (!allocation)
 		return NULL;
-	/* This follows arm64 module_alloc/execmem: code addresses and PC-relative
-	 * literal loads use the kernel tag, not a random data allocation tag. */
-	/* Do not use the build-configuration-dependent kasan_reset_tag macro:
-	 * the running kernel may enable HW_TAGS when the DDK does not. For a
-	 * kernel-half ARM64 VA, resetting bits 63:56 gives the kernel tag. */
+	/* This follows arm64 module_alloc/execmem: the top byte is set to 0xff, which is
+	 * the kernel tag for a kernel-half ARM64 VA, and the running kernel may enable
+	 * HW_TAGS when the DDK does not. */
 	addr = (unsigned long)allocation | (0xffUL << 56);
 	if (!IS_ALIGNED(addr, PAGE_SIZE) || addr < start ||
 	    addr > end - 2 * PAGE_SIZE) {

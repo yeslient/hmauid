@@ -40,18 +40,18 @@ KBUILD_ARGS := M=$(MDIR)
 endif
 
 obj-m += tosya.o
-tosya-objs := main.o patch.o inline.o inline_entry.o inline_alloc.o status.o tag.o inline_hooks.o \
-	table_hooks.o inode_hook.o hooks.o policy.o lsm.o netlink.o tiers.o
+tosya-objs := main.o patch.o inline.o inline_entry.o inline_alloc.o status.o tag.o inline_hooks.o hooks.o \
+	table_hooks.o inode_hook.o dir_hook.o policy.o lsm.o netlink.o tiers.o
 
 ifeq ($(strip $(LSE_HDR)$(SP_REG)$(KGDB_BRK)),)
 else
 ccflags-y += -include $(MDIR)/include/kmi_compat.h
 endif
 ifneq ($(SP_REG),)
-ccflags-y += -DUIDFAKE_SP_REGISTER
+ccflags-y += -DTOSYA_SP_REGISTER
 endif
 ifneq ($(KGDB_BRK),)
-ccflags-y += -DUIDFAKE_KGDB_BRK
+ccflags-y += -DTOSYA_KGDB_BRK
 endif
 ccflags-y += -I$(MDIR)/include
 ccflags-y += -I$(MDIR)

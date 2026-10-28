@@ -1,15 +1,58 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* tosya: kernel-side uid existence guard (userspace-resolved policy). */
-#ifndef UIDFAKE_H
-#define UIDFAKE_H
+// tosya: kernel-side uid existence guard (userspace-resolved policy).
+#ifndef TOSYA_H
+#define TOSYA_H
 
 #include <linux/jump_label.h>
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/uidgid.h>
 
-#define POLICY_MAX_PAIRS \
-	65536 /* 23k+ pairs appeared in the field: see the host test */
+// The bytes a token in memory is made of: everything a package name may hold, and nothing else.
+static inline bool tosya_name_char(u8 c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+	       (c >= '0' && c <= '9') || c == '_' || c == '.';
+}
+
+/*
+ * A package name, by the platform's own rule and in its own order
+ * (FrameworkParsingPackageUtils.validateName): a segment starts with a letter, and digits and '_'
+ * only follow once one has been seen; '.' ends a segment and the next one starts over, so it too
+ * has to be followed by a letter. Anything else is not a package name -- '-' included.
+ *
+ * The same predicate decides what the table stores and what the userspace half is allowed to hand
+ * over: a name that fails it is never silently kept on one side only.
+ */
+static inline bool tosya_package_name_ok(const u8 *name, u32 len)
+{
+	bool front = true;
+	u32 i;
+
+	if (len == 0)
+		return false;
+	for (i = 0; i < len; i++) {
+		u8 c = name[i];
+
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			front = false;
+			continue;
+		}
+		if (!front && ((c >= '0' && c <= '9') || c == '_'))
+			continue;
+		if (c == '.') {
+			front = true;
+			continue;
+		}
+		return false;
+	}
+	/* Only the characters are judged here, in the platform's own order. Whether a separator is
+	 * required and how long a name may be are the callers' rules, the same way they are there. */
+	return true;
+}
+
+// more than the host test's largest policy carries
+#define POLICY_MAX_PAIRS 65536
 
 /*
  * Two tables. The target table is read on every query and is indexed like the
@@ -17,19 +60,20 @@
  * line read either way; the caller table is matched by uid and its cost may
  * differ between callers. A target's mask is a bitmap over dense hider ids, so
  * a target can be hidden from any subset of the policy's callers and the caller
- * count is limited only by POLICY_MAX_CALLERS.
+ * count is limited only by POLICY_MAX_CALLERS. A line holds POLICY_WAY target slots and
+ * POLICY_CLINE_WAY caller slots.
  */
-
-#define POLICY_WAY 8 /* target slots per 64-byte line */
+#define POLICY_WAY 8
 /* How many lines one target may be placed after its own. Probing across lines rather
  * than across the slots of a single line is what keeps the table small: the line count
  * then follows the number of targets instead of the worst collision on one line, which
  * is what needed 32768 lines (2 MB) for 24000 targets where 4096 (256 KB) do. */
 #define POLICY_PROBE_MAX 4
-#define POLICY_CLINE_WAY 8 /* caller slots per 64-byte line */
+// caller slots per 64-byte line
+#define POLICY_CLINE_WAY 8
 #define POLICY_MIN_LINES 16
-#define POLICY_MAX_LINES \
-	32768 /* 8 slots a line, so this covers ~260k targets */
+// 8 slots a line, so this covers ~260k targets
+#define POLICY_MAX_LINES 32768
 #define POLICY_MAX_CALLERS 4096
 #define POLICY_REPL_BITS 12
 /*
@@ -49,16 +93,18 @@
 #define POLICY_REPL_BASE 20001u
 #define POLICY_REPL_MAX (1u << POLICY_REPL_BITS)
 #define POLICY_ID_NONE 0xffffffffu
-#define POLICY_APP_ID_MIN 10000u /* app uids: 10000 + appid + user * 100000 */
+// app uids: 10000 + appid + user * 100000
+#define POLICY_APP_ID_MIN 10000u
 #define POLICY_APP_ID_SPAN 10000u
-#define POLICY_WILD_FLAG (1u << 15) /* slot flag: "hide from any caller" */
+// slot flag: "hide from any caller"
+#define POLICY_WILD_FLAG (1u << 15)
 
 /*
  * The uid hash is not hardcoded here on purpose: policy.c reads the formula the
- * running kernel actually uses back from find_user() at policy-apply time.
+ * running kernel uses back from find_user() at policy-apply time.
  */
 
-struct uid_pair { /* 8 bytes: POLICY_WAY of them fill one cache line */
+struct uid_pair { // 8 bytes: POLICY_WAY of them fill one cache line
 	u32 target;
 	u16 repl_k;
 	/* Which of the interned caller masks this slot uses. The same set of callers
@@ -78,8 +124,9 @@ void policy_apply(const u32 *pairs, u32 npairs);
 extern struct static_key_false tosya_debug_key;
 #define TOSYA_DEBUG_ON() static_branch_unlikely(&tosya_debug_key)
 void tosya_debug_init(bool on);
-/* 0 = not hidden; otherwise the same-bucket replacement uid */
-/* Explicit identity: the self-check in policy_apply() and the host test. */
+
+// 0 = not hidden; otherwise the same-bucket replacement uid
+// Explicit identity: the self-check in policy_apply() and the host test.
 u32 policy_lookup_as(uid_t caller, uid_t target);
 
 /*
@@ -91,8 +138,7 @@ u32 policy_lookup_as(uid_t caller, uid_t target);
  * child keeps answering as the app it came from. That is what makes the caller
  * identity unforgeable: setuid() can no longer pick which hiding rules apply.
  * Only the app id is stored, because the policy is keyed by app id anyway.
- */
-/*
+ *
  * The name a task carries sits in bits 40..53: an app id is below 10000, so
  * fourteen bits hold one plus its offset. The window bit is above that field,
  * not inside it -- a tag with the top bit set would read back as "still
@@ -102,8 +148,8 @@ u32 policy_lookup_as(uid_t caller, uid_t target);
 #define TOSYA_TAG_MASK 0x3fffUL
 #define TOSYA_APP_MIN POLICY_APP_ID_MIN
 #define TOSYA_APP_SPAN POLICY_APP_ID_SPAN
-#define TOSYA_ISOLATED_START \
-	90000u /* KernelSU: app_zygote children are 90000-98999 too */
+// app_zygote children are 90000-98999 too
+#define TOSYA_ISOLATED_START 90000u
 
 /*
  * Isolated children are marked before they can be named: the flag sits above
@@ -113,11 +159,62 @@ u32 policy_lookup_as(uid_t caller, uid_t target);
  */
 #define TOSYA_TAG_PENDING (1UL << 55)
 
-#define TOSYA_APK_MAX \
-	10000 /* app apks whose open is replaced. Android allows 10000 app ids per \
-	      * user; real devices stay well under this. */
+/*
+ * App apks whose open is replaced. 10000 was one user's app-id range, and that is no longer the
+ * whole set: every extracted native library is an entry too (its open is what names a native
+ * isolated child), and a real device carries a few thousand of those. 65536 holds both with room.
+ */
+#define TOSYA_APK_MAX 65536
 
-u32 tosya_tag_app(void); /* app id + 1, or 0 when untagged */
+/*
+ * The data directories a package is not supposed to have (dir_hook.c). The parents
+ * whose ->lookup is replaced are recorded for the life of the module; the hidden
+ * names arrive as a set, keyed by the app id the caller was born with.
+ */
+#define TOSYA_DIR_MAX 1024u // protected parent directories
+#define TOSYA_HIDDEN_MAX 8192u // names in one set
+#define TOSYA_NAME_MAX 255u // a package name is shorter than this
+int tosya_dir_init(void);
+void tosya_dir_exit(void);
+void tosya_dir_refresh(void);
+void tosya_dir_names_reset(void);
+int tosya_dir_name_add(u32 op, u32 caller, const u8 *name, u32 len);
+int tosya_dir_names_apply(void);
+/* The 128-bit secret a token stream carries (netlink.c). The synthetic names a
+ * hidden lookup asks the filesystem about are derived from it and never leave
+ * kernel memory: this only hands it to the directory side. */
+void tosya_token_get(u32 out[4]);
+struct qstr;
+/*
+ * The one preparation a walk makes: probe the published set the fixed number of
+ * times, then report the hit, the entry's stored mask bytes and the entry's
+ * precomputed hash(M). The hook selects them, or the original bytes and hash,
+ * with conditional selects. The length is not touched: the stored mask has the
+ * name's length.
+ */
+bool tosya_dir_walk_last(const struct qstr *last, const u8 **mask_bytes,
+			 u32 *mask_hash);
+u32 tosya_dir_name_count(void);
+u32 tosya_dir_guard_count(void);
+
+/*
+ * Streaming upload entry points (used by netlink.c): one record lands one file, gen is
+ * the generation of this upload. finish parks every entry outside that generation and
+ * returns how many stayed.
+ */
+struct inode;
+// Matching a token costs its length, not the size of the list. Returns the matched length.
+// cp_new_stat()'s encoding, shared by everything that names a file by its numbers.
+u32 tosya_encode_dev(dev_t s_dev);
+
+// The sockets whose holder is the task that starts apps, given at runtime.
+
+bool tosya_apk_shadow_apply(struct inode *inode);
+void tosya_apk_shadow_reclaim(struct inode *inode);
+void tosya_apk_shadow_sweep(void);
+int tosya_apk_stream(u32 op, u32 uid, u32 dev, u64 ino, const char *path,
+		     u32 bytes);
+u32 tosya_apk_stream_finish(void);
 
 void tosya_tag_name(u32 app);
 void tosya_tag_close(void);
@@ -127,13 +224,86 @@ struct pt_regs;
 
 typedef long (*tosya_syscall_t)(const struct pt_regs *);
 
-u32 policy_query(uid_t target);
+#include <linux/rcupdate.h>
 
+/*
+ * What the query reads before it decides: the caller's own entry in the snapshot that is published
+ * right now, and whether that snapshot carries a wildcard (a pair whose caller has no rules of its
+ * own). Both live inside the snapshot, so a query still reads one consistent whole.
+ */
+struct policy_hot {
+	const u16 *cid;
+	u32 wild;
+};
+
+struct policy;
+
+/* The published snapshot. struct policy_hot is its first member, so the inlined half can read the
+ * two words it needs out of the same pointer the walk uses: one swap, one consistent whole. */
+extern struct policy *g_pol __rcu;
+
+u32 policy_lookup_slow(uid_t target, u32 app);
+void policy_tagless_note(void);
+
+// App id to hider id, shared by both halves so there is one implementation of it.
+static __always_inline u32 policy_cid_hot(const struct policy_hot *hot, u32 app)
+{
+	const u32 id = (app < TOSYA_APP_SPAN) ? hot->cid[app] : 0xffffu;
+
+	return (id != 0xffffu) ? id : POLICY_ID_NONE;
+}
+
+/*
+ * The caller tag: the app id + 1 in the upper bits of thread_info->flags, or 0 when the process was
+ * never tagged. Four instructions and no branches, so the inlined half of the query reads it directly
+ * instead of paying a call for it.
+ */
+static __always_inline u32 tosya_tag_app(void)
+{
+	return (u32)((task_thread_info(current)->flags >> TOSYA_TAG_SHIFT) &
+		     TOSYA_TAG_MASK);
+}
+
+/*
+ * The half of the query that every hooked wrapper runs. A caller with no rules of its own is answered
+ * here, inside the wrapper: that is what a hooked syscall costs for everyone who is not being lied to.
+ * The walk for the callers that have rules is out of line. What is read on the way out is the caller's
+ * identity and the policy, never the answer, so a target that is hidden and one that was never
+ * configured leave through the same instructions with one register different.
+ */
+static __always_inline u32 policy_query(uid_t target)
+{
+	const u32 tag_app = tosya_tag_app();
+	const u32 app =
+		tag_app -
+		1u; // the tag carries the app id + 1; the tables are indexed by the id
+	struct policy_hot *hot;
+	u32 cid;
+
+	if (unlikely(tag_app == 0)) {
+		policy_tagless_note();
+		return 0;
+	}
+	if ((u32)target % 100000u == app)
+		return 0;
+	rcu_read_lock();
+	// struct policy_hot is the first member of the snapshot, so this is the same object.
+	hot = (struct policy_hot *)rcu_dereference(g_pol);
+	cid = policy_cid_hot(hot, app);
+	if (likely(cid == POLICY_ID_NONE && !hot->wild)) {
+		rcu_read_unlock();
+		return 0;
+	}
+	rcu_read_unlock();
+	return policy_lookup_slow(target, app);
+}
+
+void tosya_status_add_flags(unsigned int flags);
 void tosya_status_set_hooks_expected(unsigned int native, unsigned int compat);
 void tosya_status_add_hooks(unsigned int native, unsigned int compat);
 void tosya_status_add_hooks_expected(unsigned int native, unsigned int compat);
 
-/* The first bytes of a symbol about to be copied, when the debug key is on. */
+// The first bytes of a symbol about to be copied, when the debug key is on.
 void tosya_debug_dump(const char *name, unsigned long addr, unsigned long size);
 
 static __always_inline u64 tosya_select(u64 when_true, u64 when_false,
@@ -154,14 +324,7 @@ static __always_inline u64 tosya_select(u64 when_true, u64 when_false,
 #endif
 }
 
-/*
- * blob: u32 n, then n * (action, uid, off, len), then the paths those offsets
- * point into. action 0 replaces the open of the base.apk at that path, 1 puts
- * it back, so the helper can send only what changed. A replaced inode names a
- * waiting isolated child from the app the apk belongs to.
- */
-int tosya_apk_apply(const u32 *blob, u32 len);
-void tosya_apk_remove(void); /* put every inode back (module exit) */
+void tosya_apk_remove(void); // put every inode back (module exit)
 void tosya_tag_adopt(u32 old_uid, u32 new_uid);
 void tosya_tag_prime(void);
 bool tosya_tag_isset(void);
@@ -176,7 +339,7 @@ int tosya_lsm_install(void);
 void tosya_lsm_remove(void);
 
 /*
- * The status the tool reads over netlink (include/kaux.h). hooks.c owns it,
+ * The status the userspace half reads over netlink (include/kaux.h). hooks.c owns it,
  * lsm.c and the hook table fill it in as they go.
  */
 struct kaux_status;
@@ -186,7 +349,13 @@ void tosya_status_set_uid_tier(const char *name);
 void tosya_status_set_setuid_tier(const char *name);
 void tosya_status_set_apks(unsigned int inodes, unsigned int expected,
 			   unsigned int failed);
+void tosya_status_set_hidden(unsigned int names, unsigned int guards);
+void tosya_status_set_hidden_failed(unsigned int failed);
 void tosya_status_note(int error);
+
+int tosya_unlock_inode_install(void);
+int tosya_lookup_fast_install(void);
+int tosya_evict_inode_install(void);
 
 int policy_init(void);
 void policy_free(void);
@@ -202,10 +371,10 @@ int tosya_patch_text(void *dst, const void *src, size_t len, bool sync);
 int tosya_patch_insn(void *dst, u32 expected, u32 replacement);
 bool tosya_inline_active(void);
 
-/* Read kernel text through the nofault copy, for diagnostics only. */
+// Read kernel text through the nofault copy, for diagnostics only.
 bool tosya_read(const void *src, void *dst, size_t len);
 int tosya_patch_init(void);
-unsigned long tosya_lookup(const char *name);
+unsigned long tosya_sym(const char *name);
 
 /*
  * A symbol's address and its extent: the following symbol bounds it, which is
@@ -253,4 +422,4 @@ static inline unsigned long arm64_bl_target(unsigned long pc, u32 insn)
 int netlink_init(void);
 void netlink_exit(void);
 
-#endif /* UIDFAKE_H */
+#endif

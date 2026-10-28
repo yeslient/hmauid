@@ -100,6 +100,10 @@ private:
   std::map<std::string, std::filesystem::path, std::less<>> code_dirs_;
 
   std::vector<Pair> pushed_;
+  /* The hidden-name set the directory guard last confirmed, so an unchanged
+   * config does not re-send it. */
+  std::vector<HiddenName> pushed_names_;
+  bool names_pushed_ = false;
   using ApkId = std::pair<std::uint32_t, std::uint64_t>;
   enum class ApkPhase { Confirmed, Adding, Dropping };
   struct PublishedApk {

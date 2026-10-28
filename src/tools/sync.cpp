@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -65,6 +66,13 @@ constexpr std::size_t kApkLimit = 10000;
             std::to_string(st->apk_offered) + " failed)";
   else if (st->apk_failed_total)
     line += " (" + std::to_string(st->apk_failed_total) + " failed since boot)";
+  /* The directory guard: the names it hides and the parents it stands over,
+   * from the same status the kernel refreshes at every names END. */
+  if (st->hidden_names || st->hidden_guards)
+    line += ", hidden " + std::to_string(st->hidden_names) + " name(s)/" +
+            std::to_string(st->hidden_guards) + " dir guard(s)";
+  if (st->hidden_failed)
+    line += ", " + std::to_string(st->hidden_failed) + " name(s) refused";
   /* The geometry the module was built for, against the running kernel's: the
    * fixmap address and the page tables both follow from it, and the module
    * proves its writes before making them. Saying which one is in play is what
@@ -90,6 +98,46 @@ constexpr std::size_t kApkLimit = 10000;
 [[nodiscard]] bool dir_matches(std::string_view leaf, std::string_view pkg) {
   return leaf.size() > pkg.size() && leaf.compare(0, pkg.size(), pkg) == 0 &&
          leaf[pkg.size()] == '-';
+}
+
+/* The token the directory masks are derived from: 16 random bytes generated
+ * once per installation, kept beside the log, and pushed ahead of every names
+ * stream. A new token re-masks every published name, so it must not change
+ * behind the kernel's back mid-run. */
+[[nodiscard]] std::optional<std::array<std::uint32_t, 4>>
+installation_token() {
+  const auto dir = module_dir();
+  if (dir.empty())
+    return std::nullopt;
+  const auto file = dir / "state" / "token";
+  std::array<std::uint32_t, 4> words{};
+
+  std::ifstream in{file, std::ios::binary};
+  if (in) {
+    in.read(reinterpret_cast<char *>(words.data()), sizeof(words));
+    if (in.gcount() == static_cast<std::streamsize>(sizeof(words)))
+      return words;
+    in.close();
+  }
+
+  std::ifstream urandom{"/dev/urandom", std::ios::binary};
+  if (!urandom)
+    return std::nullopt;
+  urandom.read(reinterpret_cast<char *>(words.data()), sizeof(words));
+  if (urandom.gcount() != static_cast<std::streamsize>(sizeof(words)))
+    return std::nullopt;
+
+  std::error_code ec;
+  std::filesystem::create_directories(file.parent_path(), ec);
+  std::ofstream out{file, std::ios::binary | std::ios::trunc};
+  if (!out)
+    return std::nullopt;
+  out.write(reinterpret_cast<const char *>(words.data()), sizeof(words));
+  out.close();
+  if (!out)
+    return std::nullopt;
+  std::filesystem::permissions(file, std::filesystem::perms::owner_read, ec);
+  return words;
 }
 
 } // namespace
@@ -294,6 +342,48 @@ void Syncer::sync_now(std::string_view why) {
     policy_pushed_ = true;
     Log::info("synced {} pair(s) ({})", pairs.size(), why);
     report_status(status_line(netlink_, pairs.size()));
+  }
+
+  /* The directory guard: the same pairs by package name instead of uid -- one
+   * uid can carry several names and the guard is per directory. The token goes
+   * first, because the masks are derived from it at publication. */
+  {
+    std::map<std::uint32_t, std::vector<std::string>> names_of_uid;
+    for (const auto &[name, info] : packages->by_name())
+      names_of_uid[info.uid].emplace_back(std::string{name});
+
+    std::set<std::pair<std::uint32_t, std::string>> seen;
+    std::vector<HiddenName> names;
+    names.reserve(pairs.size());
+    for (const auto &pair : pairs) {
+      const auto ns = names_of_uid.find(pair.target);
+      if (ns == names_of_uid.end())
+        continue;
+      for (const auto &name : ns->second) {
+        if (!seen.emplace(pair.caller, name).second)
+          continue;
+        names.push_back(HiddenName{.caller = pair.caller, .name = name});
+      }
+    }
+
+    const auto same_name = [](const HiddenName &a, const HiddenName &b) {
+      return a.caller == b.caller && a.name == b.name;
+    };
+    if (!names_pushed_ ||
+        !std::ranges::equal(names, pushed_names_, same_name)) {
+      const auto token = installation_token();
+      if (!token || !netlink_.push_token(*token)) {
+        watcher_.arm_retry();
+        return;
+      }
+      if (!netlink_.push_names(names)) {
+        watcher_.arm_retry();
+        return;
+      }
+      pushed_names_.assign(names.begin(), names.end());
+      names_pushed_ = true;
+      Log::info("synced {} hidden name(s) ({})", names.size(), why);
+    }
   }
 
   std::set<std::uint32_t> caller_uids;

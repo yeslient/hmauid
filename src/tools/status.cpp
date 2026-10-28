@@ -13,10 +13,9 @@
 #include "common.hpp"
 
 namespace tosya {
-namespace {
 
 /* Where this binary was started from: the module directory, the way the boot
- * scripts invoke it. */
+ * scripts invoke it. Also where the token file lives, so this is shared. */
 std::filesystem::path module_dir() {
   std::error_code ec;
   const auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
@@ -25,6 +24,8 @@ std::filesystem::path module_dir() {
     return {};
   return self.parent_path();
 }
+
+namespace {
 
 /* The description without the status this tool put in front of it earlier. */
 std::string strip_status(const std::string &line) {

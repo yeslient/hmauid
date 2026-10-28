@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string_view>
 
 namespace tosya {
+
+/* Where this binary was started from: the module directory, the way the boot
+ * scripts invoke it. Empty when it cannot be told. */
+[[nodiscard]] std::filesystem::path module_dir();
 
 /*
  * What the module says about itself where a user will see it: the description

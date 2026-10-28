@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/module.h>
-#ifdef UIDFAKE_HOST_TEST
-#include <string.h> /* the host test compiles this file against its own shims */
+#ifdef TOSYA_HOST_TEST
+// the host test compiles this file against its own shims
+#include <string.h>
 #else
 #include <linux/string.h>
 #endif
@@ -16,7 +17,7 @@ extern const struct tosya_tier tosya_tier_setuid_inline;
 extern const struct tosya_tier tosya_tier_setuid_lsm;
 extern const struct tosya_tier tosya_tier_setuid_setters;
 
-#ifdef UIDFAKE_HOST_TEST
+#ifdef TOSYA_HOST_TEST
 static const struct tosya_tier *const *g_test_tiers;
 static unsigned int g_test_tiers_n;
 
@@ -27,7 +28,7 @@ void tosya_tier_set_table(const struct tosya_tier *const *tiers, unsigned int n)
 }
 #endif
 
-#ifndef UIDFAKE_HOST_TEST
+#ifndef TOSYA_HOST_TEST
 static const struct tosya_tier *const g_tiers[] = {
 	&tosya_tier_uid_inline,	    &tosya_tier_uid_tables,
 	&tosya_tier_setuid_inline,  &tosya_tier_setuid_lsm,
@@ -39,7 +40,7 @@ static const struct tosya_tier *const g_tiers[] = { NULL };
 
 static const struct tosya_tier *tier_at(unsigned int i)
 {
-#ifdef UIDFAKE_HOST_TEST
+#ifdef TOSYA_HOST_TEST
 	if (g_test_tiers)
 		return g_test_tiers[i];
 #endif
@@ -48,7 +49,7 @@ static const struct tosya_tier *tier_at(unsigned int i)
 
 static unsigned int tier_count(void)
 {
-#ifdef UIDFAKE_HOST_TEST
+#ifdef TOSYA_HOST_TEST
 	if (g_test_tiers)
 		return g_test_tiers_n;
 #endif

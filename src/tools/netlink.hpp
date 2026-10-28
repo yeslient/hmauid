@@ -22,15 +22,27 @@ struct ApkEntry {
    * and what asks for it back when only the numbers are left. */
   std::uint32_t dev = 0;
   std::uint64_t ino = 0;
-  /* 1 puts the file back instead of replacing it, so a package change can be
+  /* 1 removes the identity from the kernel's table, so a package change can be
    * sent as the difference it is. */
   std::uint32_t action = 0;
+};
+
+/* One hidden package name for the directory guard: `caller` (0 = every app
+ * uid) must not be able to see that package under its data directories. */
+struct HiddenName {
+  std::uint32_t caller = 0;
+  std::string name;
 };
 
 /*
  * Talks to the module's generic netlink family. The family itself only accepts
  * requests from processes holding CAP_NET_ADMIN and is invisible to app
  * domains, so the policy never travels over a path an app could read.
+ *
+ * The protocol is streaming (kaux.h): BEGIN opens a stream of one kind, BATCH
+ * carries self-delimited records up to the kernel's per-message cap, END
+ * applies or reports. The kernel refuses a stream whose version does not match
+ * its own, so module and tool have to come from the same build.
  */
 class NetlinkClient {
 public:
@@ -39,13 +51,28 @@ public:
   NetlinkClient(const NetlinkClient &) = delete;
   NetlinkClient &operator=(const NetlinkClient &) = delete;
 
-  /* The kernel holds at most POLICY_MAX_PAIRS pairs (src/include/tosya.h),
-   * and one page carries kPagePairs of them. */
+  /* The kernel holds at most POLICY_MAX_PAIRS pairs (src/include/tosya.h). */
   static constexpr std::size_t kMaxPairs = 65536;
+
+  /* The 128-bit token the directory masks are derived from. Sent ahead of the
+   * names; the kernel keeps it until the next token stream replaces it. */
+  [[nodiscard]] bool push_token(std::span<const std::uint32_t, 4> words);
 
   /* Replaces the kernel's policy with `pairs` (an empty list clears it).
    * Failures are logged; false means the kernel side is not reachable yet. */
   [[nodiscard]] bool push(std::span<const Pair> pairs);
+
+  /* Replaces the kernel's hidden-name set (an empty list clears it). The
+   * token has to be in place first: the masks are derived at publication. */
+  [[nodiscard]] bool push_names(std::span<const HiddenName> names);
+
+  /* Applies caller-APK inode deltas. Removal needs explicit action=1 entries;
+   * an empty list has no effect on the kernel's existing records. */
+  [[nodiscard]] bool push_apks(std::span<const ApkEntry> entries);
+
+  /* Re-resolves the protected parent directories (a user was added). The
+   * names END does this too, so this is for the cases in between. */
+  [[nodiscard]] bool refresh();
 
   /* What the module says it hooked, straight from the kernel (KAUX_CMD_STATUS).
    * Empty when it does not answer, which is what a module that is not loaded
@@ -55,26 +82,24 @@ public:
    * loaded was built before the command existed. */
   [[nodiscard]] bool unsupported() const { return unsupported_; }
 
-  /* Applies caller-APK inode deltas. Removal needs explicit action=1 entries;
-   * an empty list has no effect on the kernel's existing records. */
-  [[nodiscard]] bool push_apks(std::span<const ApkEntry> entries);
-
-  /* One staged upload: begin, pages of at most kPageBytes, commit. */
-  [[nodiscard]] bool send_staged(std::uint32_t kind,
-                                 std::span<const std::byte> bytes);
-
 private:
   static constexpr std::string_view kFamilyName = KAUX_FAMILY_NAME;
-  /* Must match the enum and the version in src/netlink.c. */
-  /* The commands, attributes and blob kinds are the shared wire format in
-   * include/kaux.h -- the file the module includes too, so a command that moves
-   * on one side moves on the other or the build stops here. */
+  /* The kernel caps one blob at KAUX_BATCH_BYTES, four bytes of which are the
+   * batch header the record count lives in. */
+  static constexpr std::size_t kBatchBytes = 32768;
+  static constexpr std::size_t kBatchRecordsBytes = kBatchBytes - 4;
   static constexpr std::size_t kReplySize = 4096;
+
+  /* One BEGIN / BATCH... / END sequence over pre-serialized records, one
+   * vector of bytes per record. An empty list is BEGIN and END alone, which is
+   * how an empty set is expressed. */
+  [[nodiscard]] bool stream(std::uint32_t kind,
+                            std::span<const std::vector<std::byte>> records,
+                            std::string_view what);
 
   /* One line per outage, and one when it ends. */
   void note_reachable();
   [[nodiscard]] bool ensure_connected();
-  [[nodiscard]] bool send_paged(std::span<const Pair> pairs);
   [[nodiscard]] bool send_command(std::uint8_t cmd,
                                   std::span<const std::byte> blob);
   [[nodiscard]] std::optional<std::uint16_t> resolve_family();

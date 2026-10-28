@@ -24,8 +24,7 @@ add_executable(sync-tool
     rules.cpp
   preset_rules.cpp
     packages.cpp
-    paths.cpp
-    paging.cpp)
+    paths.cpp)
 
 target_link_libraries(sync-tool PRIVATE nlohmann_json::nlohmann_json dl z)
 # Resolved at run time on purpose: __system_property_wait() and __system_property_serial() are

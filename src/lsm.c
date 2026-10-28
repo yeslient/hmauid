@@ -2,18 +2,16 @@
 /*
  * lsm.c - watch a task's identity change where the kernel commits it.
  *
- * The id setters used to be hooked in the syscall table: six entries per table,
- * and a wrapper that had to sample the fsuid before and after the call to see
- * what had happened. The kernel already has the exact place for that -- the LSM
- * hook the setuid family calls with both creds in hand -- and taking it costs one
- * indirect call on a path that is doing real work anyway.
+ * The id setters are hooked where the kernel commits the change: the LSM hook the
+ * setuid family calls with both creds in hand. It costs one indirect call on a
+ * path that is doing real work anyway, and there is no need to sample the fsuid
+ * before and after the call to see what happened.
  *
- * Registration is the shape KernelSU uses. The hook heads are resolved by name,
- * because they are not exported; the entry already sitting in a head has its
- * function pointer replaced by this module's, which runs first and calls what it
- * replaced. Nothing is added to or taken out of a list an LSM registered, so the
- * shape of every hook list is left exactly as it was, and unloading puts the
- * pointer back.
+ * The hook heads are resolved by name, because they are not exported; the entry
+ * already sitting in a head has its function pointer replaced by this module's,
+ * which runs first and calls what it replaced. Nothing is added to or taken out
+ * of a list an LSM registered, so the shape of every hook list is left exactly
+ * as it was, and unloading puts the pointer back.
  *
  * Only the setuid hook is taken. The gid setters ran the same code, but a gid
  * change does not move the fsuid, so that path only ever saw a value that had not
@@ -37,63 +35,14 @@
  */
 #include <linux/lsm_hooks.h>
 
-/*
- * What implements the hook. commoncap has cap_task_fix_setuid in every kernel
- * this module is built for, and it is the one that has to keep running;
- * safesetid is the only other implementation. SELinux is not in the list
- * because it does not implement task_fix_setuid at all -- that was checked in
- * all eight trees, which is also where the "no implementation" log came from on
- * a device that then took the capability LSM's entry anyway.
- */
-static const char *const tosya_target_names[] = {
-	"cap_task_fix_setuid",
-	"safesetid_task_fix_setuid",
-};
-/* Which of the two was found, so the status line names what is really there
- * instead of what the build assumed. */
-static const char *g_target_name;
-
-/*
- * One name, in the spelling a table holds: the jump-table entry before 6.1 and
- * the plain symbol from there on, so both are tried.
- */
-static void *tosya_resolve_named(const char *name)
-{
-	unsigned long addr = tosya_lookup(name);
-
-	if (addr) {
-		g_target_name = name;
-		return (void *)addr;
-	}
-	addr = tosya_lookup_raw(name);
-	if (addr) {
-		g_target_name = name;
-		return (void *)addr;
-	}
-	return NULL;
-}
-
-static void *tosya_resolve_target(void)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(tosya_target_names); i++) {
-		void *addr = tosya_resolve_named(tosya_target_names[i]);
-
-		if (addr)
-			return addr;
-	}
-	return NULL;
-}
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 
 typedef int (*tosya_setid_fn)(struct cred *new, const struct cred *old,
 			      int flags);
 
-static struct security_hook_list *g_node; /* ours, when no LSM had the hook */
-static void *g_orig; /* what the pointer held before */
-static void **g_slot; /* the function pointer that was patched */
+static struct security_hook_list *g_node; // ours, when no LSM had the hook
+static void *g_orig; // what the pointer held before
+static void **g_slot; // the function pointer that was patched
 
 static int tosya_fix_setuid(struct cred *new, const struct cred *old,
 			    int flags);
@@ -101,7 +50,7 @@ static int tosya_fix_setuid(struct cred *new, const struct cred *old,
 /*
  * The call back into the replaced function, from a function that is itself
  * reached through an indirect call: on a pre-kCFI kernel both ends of that are
- * checked, so this is marked the way KernelSU marks its dispatcher.
+ * checked, so this is marked __nocfi.
  */
 static noinline int __nocfi tosya_orig_setuid(struct cred *new,
 					      const struct cred *old, int flags)
@@ -146,9 +95,44 @@ static int tosya_fix_setuid(struct cred *new, const struct cred *old, int flags)
  * first. On a pre-kCFI kernel the table holds the plain symbol while a call site
  * reaches the jump-table one, so both spellings are accepted.
  */
+static const char *g_target_name;
+
+/*
+ * What implements the hook. commoncap has cap_task_fix_setuid in every kernel
+ * this module is built for, and it is the one that has to keep running;
+ * safesetid is the only other implementation. SELinux does not implement
+ * task_fix_setuid, so it is not in the list.
+ */
+static const char *const tosya_target_names[] = {
+	"cap_task_fix_setuid",
+	"safesetid_task_fix_setuid",
+};
+
+static void *tosya_resolve_target(void)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(tosya_target_names); i++) {
+		/* the spelling a table holds: jump-table entry before 6.1, plain
+		 * symbol from there on */
+		unsigned long addr = tosya_sym(tosya_target_names[i]);
+		unsigned long plain;
+
+		if (!addr) {
+			plain = tosya_lookup_raw(tosya_target_names[i]);
+			addr = plain;
+		}
+		if (addr) {
+			g_target_name = tosya_target_names[i];
+			return (void *)addr;
+		}
+	}
+	return NULL;
+}
+
 static int tosya_lsm_install_hook(void)
 {
-	unsigned long heads_addr = tosya_lookup("security_hook_heads");
+	unsigned long heads_addr = tosya_sym("security_hook_heads");
 	struct hlist_head *head;
 	struct security_hook_list *e;
 	void *target = tosya_resolve_target();
@@ -249,41 +233,6 @@ void tosya_lsm_remove(void)
 	if (!g_slot)
 		return;
 	/*
-	 * The entry this module brought itself comes first, because the check
-	 * below does not fit it: that slot holds &g_node->list and not this
-	 * module's handler, so comparing the two would always say "not ours",
-	 * the head would keep pointing into this module and the next setuid
-	 * after unload would walk into memory that is already gone. g_node is
-	 * what tells the two apart.
-	 */
-	if (g_node) {
-		struct hlist_node *next = READ_ONCE(g_node->list.next);
-		void *restore = next ? (void *)next : nul;
-
-		/*
-		 * A registration that came after ours chained itself behind this
-		 * entry, and its pprev points into g_node. It has to point at the
-		 * head before the head is given that entry -- and the head keeps
-		 * the rest of the list, because taking it away would undo work
-		 * that is not this module's.
-		 */
-		if (next)
-			next->pprev = &g_node->head->first;
-		if (tosya_patch_text(g_slot, &restore, sizeof(restore), true) ||
-		    READ_ONCE(*g_slot) != restore)
-			pr_emerg(
-				"tosya: the setuid hook slot still points at this module\n");
-		smp_wmb();
-		/* The grace period comes before the free: a task may still be on
-		 * its way through this entry. */
-		synchronize_rcu();
-		kfree(g_node);
-		g_node = NULL;
-		g_slot = NULL;
-		g_orig = NULL;
-		return;
-	}
-	/*
 	 * Another patcher may have taken this slot since -- KernelSU takes a hook
 	 * the same way -- and what would be written back is then either its work or,
 	 * worse, an address inside a module that has already gone. A hook that is no
@@ -293,7 +242,14 @@ void tosya_lsm_remove(void)
 		pr_warn("tosya: the setuid hook is no longer ours; leaving it alone\n");
 		return;
 	}
-	if (g_orig) {
+	if (g_node) {
+		if (tosya_patch_text(g_slot, &nul, sizeof(nul), true) ||
+		    READ_ONCE(*g_slot) != NULL)
+			pr_emerg(
+				"tosya: the setuid hook slot still points at this module\n");
+		kfree(g_node);
+		g_node = NULL;
+	} else if (g_orig) {
 		if (tosya_patch_text(g_slot, &g_orig, sizeof(g_orig), true) ||
 		    READ_ONCE(*g_slot) != g_orig)
 			pr_emerg(
@@ -327,16 +283,16 @@ int tosya_lsm_install(void)
 	return 0;
 }
 
-#else /* >= 6.12: every hook sits behind its own static call */
+// >= 6.12: every hook sits behind its own static call
+#else
 
 /*
  * From 6.12 a hook is not a function pointer in a list any more: each hook owns
  * an array of static calls, one slot per registered LSM, and the call site is a
  * patched branch. The table that holds them is built at boot and is read-only
  * afterwards, so the slot is found by walking it, and both the slot's own
- * function pointer and the static call behind it have to be moved -- the same
- * pair KernelSU keeps in step, including the rollback when the second half
- * fails.
+ * function pointer and the static call behind it have to be moved together,
+ * including the rollback when the second half fails.
  */
 typedef int (*tosya_kallsyms_size_t)(unsigned long addr,
 				     unsigned long *symbolsize,
@@ -413,8 +369,8 @@ static int tosya_fix_setuid(struct cred *new, const struct cred *old, int flags)
 
 static int tosya_lsm_install_hook(void)
 {
-	unsigned long table = tosya_lookup("static_calls_table");
-	unsigned long cnt_addr = tosya_lookup("lsm_active_cnt");
+	unsigned long table = tosya_sym("static_calls_table");
+	unsigned long cnt_addr = tosya_sym("lsm_active_cnt");
 	size_t size = sizeof(struct lsm_static_calls_table);
 	size_t count, i;
 	struct lsm_static_call *scalls;
@@ -433,7 +389,11 @@ static int tosya_lsm_install_hook(void)
 
 	/* the implementations that exist: commoncap has one on every kernel this
 	 * module is built for, safesetid is the only other (see the list above) */
-	target = tosya_resolve_target();
+	target = (void *)tosya_sym("cap_task_fix_setuid");
+	if (!target)
+		target = (void *)tosya_lookup_raw("cap_task_fix_setuid");
+	if (!target)
+		target = (void *)tosya_sym("safesetid_task_fix_setuid");
 	if (!target)
 		return -ENOENT;
 
@@ -443,21 +403,12 @@ static int tosya_lsm_install_hook(void)
 	 * rather than this build's count: take it from kallsyms when that can be reached
 	 * (KernelSU reads it the same way) and keep the compile-time count when it cannot.
 	 */
-	size_fn = (void *)tosya_lookup("kallsyms_lookup_size_offset");
+	size_fn = (void *)tosya_sym("kallsyms_lookup_size_offset");
 	if (size_fn) {
 		unsigned long sym_size = size;
 
-		/*
-		 * kallsyms can only make the walk shorter, never longer: a size it
-		 * reports is the distance to the next symbol, which on a vendor tree
-		 * is not necessarily this table, and a walk past the table this build
-		 * knows the shape of reads .rodata that is not a static call at all.
-		 * The compile-time count is the ceiling; kallsyms is believed only
-		 * when it says fewer slots than that.
-		 */
 		if (((tosya_kallsyms_size_t)size_fn)(table, &sym_size, NULL) &&
-		    sym_size >= sizeof(struct lsm_static_call) &&
-		    sym_size < size)
+		    sym_size >= sizeof(struct lsm_static_call))
 			count = sym_size / sizeof(struct lsm_static_call);
 	}
 	scalls = (struct lsm_static_call *)table;
@@ -548,13 +499,12 @@ int tosya_lsm_install(void)
 		return ret;
 	}
 	strscpy(name, "lsm: ", sizeof(name));
-	strlcat(name, g_target_name ? g_target_name : "cap_task_fix_setuid",
-		sizeof(name));
+	strlcat(name, "cap_task_fix_setuid", sizeof(name));
 	tosya_status_set_setuid_tier(name);
 	return 0;
 }
 
-#endif /* LINUX_VERSION_CODE < 6.12 */
+#endif
 
 /*
  * The LSM mechanism of the setuid family: the kernel hands task_fix_setuid both

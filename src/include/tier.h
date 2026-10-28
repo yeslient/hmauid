@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #pragma once
 
-#if defined(__KERNEL__) || defined(UIDFAKE_HOST_TEST)
+#if defined(__KERNEL__) || defined(TOSYA_HOST_TEST)
 
 struct tosya_tier {
 	const char *family;
-	const char *key; /* what a module parameter names it by */
-	const char *name; /* what the status line shows when this one wins */
-	int order; /* lower is tried first */
+	const char *key; // what a module parameter names it by
+	const char *name; // what the status line shows when this one wins
+	int order; // lower is tried first
 	int (*install)(void);
 	void (*remove)(void);
 };
@@ -32,4 +32,4 @@ void tosya_tier_revert_all(void);
 
 const char *tosya_tier_name(const char *family);
 
-#endif /* __KERNEL__ */
+#endif

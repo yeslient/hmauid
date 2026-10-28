@@ -29,22 +29,19 @@ static int probe_noop(struct kprobe *p, struct pt_regs *r)
 }
 
 /*
- * Symbol lookup, the way KernelSU does it on arm64: resolve a name through
- * kallsyms, accept the CFI jump-table variant of it as well (that is what a call
- * site reaches on a CFI kernel), and fall back to walking the whole kallsyms
- * table when kallsyms_lookup_name() cannot be had. Nothing here reads an offset
- * out of a function body.
+ * Symbol lookup: resolve a name through kallsyms, accept the CFI jump-table variant
+ * of it as well (that is what a call site reaches on a CFI kernel), and fall back to
+ * walking the whole kallsyms table when kallsyms_lookup_name() cannot be had.
+ * Nothing here reads an offset out of a function body.
  *
  * kallsyms_lookup_name() and kallsyms_on_each_symbol() are not exported to
  * modules, so their own addresses come from a probe registered on them -- kprobe
  * resolves .symbol_name through kallsyms internally -- unregistered immediately,
  * so nothing stays behind.
- */
-/*
+ *
  * Pre-kCFI kernels (before 6.1) check an indirect call against the callee's jump
  * table, so the address a call has to carry is the .cfi_jt one; from 6.1 the check
- * is a type hash on the function itself and there is no jump table to prefer. The
- * split is the one KernelSU makes with USE_KCFI.
+ * is a type hash on the function itself and there is no jump table to prefer.
  */
 #define TOSYA_USE_KCFI (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))
 
@@ -61,9 +58,9 @@ static unsigned long lookup_exported(const char *symbol)
 }
 
 /*
- * The call goes to an address kallsyms handed us, and on a pre-kCFI kernel the
+ * The call goes to an address kallsyms handed the module, and on a pre-kCFI kernel the
  * indirect-call check consults the callee's jump table: a function that reaches a
- * resolved address is marked __nocfi, the way KernelSU marks its dispatcher.
+ * resolved address is marked __nocfi.
  */
 static noinline unsigned long __nocfi lookup_name(const char *name)
 {
@@ -76,7 +73,7 @@ static noinline unsigned long __nocfi lookup_name(const char *name)
 struct find_ctx {
 	const char *name;
 	unsigned long addr;
-	unsigned long next; /* the following symbol: where the body ends */
+	unsigned long next; // the following symbol: where the body ends
 	bool prefer_cfi;
 };
 
@@ -160,7 +157,7 @@ static noinline void __nocfi find_symbol(const char *name, struct find_ctx *ctx,
 #endif
 }
 
-unsigned long tosya_lookup(const char *name)
+unsigned long tosya_sym(const char *name)
 {
 	unsigned long addr;
 
@@ -235,7 +232,7 @@ bool tosya_symbol_range(const char *name, unsigned long *addr,
  */
 static struct mm_struct *patch_mm;
 
-/* Defined below; lazy legacy-mapping calibration probes _stext with both. */
+// Defined below; lazy legacy-mapping calibration probes _stext with both.
 static phys_addr_t phys_from_virt(unsigned long addr);
 static phys_addr_t image_phys(unsigned long addr);
 
@@ -299,7 +296,7 @@ static unsigned long g_set_fixmap_addr;
 static unsigned long g_copy_nofault_addr;
 static unsigned long g_copy_from_nofault_addr;
 static unsigned long g_patch_insn_addr;
-/* Serialize our expected-value checks with our other patch operations. */
+// Serialize the module's expected-value checks with the module's other patch operations.
 static DEFINE_MUTEX(g_patch_mutex);
 
 typedef void (*tosya_set_fixmap_t)(enum fixed_addresses idx, phys_addr_t phys,
@@ -363,9 +360,9 @@ int tosya_patch_init(void)
 {
 	/* The kernel's own extent: every patch target has to be inside it, or the
 	 * write would land somewhere it has no business being. */
-	g_text_start = tosya_lookup("_stext");
-	g_text_end = tosya_lookup("_end");
-	g_core_text_end = tosya_lookup("_etext");
+	g_text_start = tosya_sym("_stext");
+	g_text_end = tosya_sym("_end");
+	g_core_text_end = tosya_sym("_etext");
 
 	/*
 	 * This module's own text: the copy of a hooked function and the stub that
@@ -381,20 +378,20 @@ int tosya_patch_init(void)
 	g_mod_end = g_mod_start + THIS_MODULE->core_layout.text_size;
 #endif
 
-	patch_mm = (struct mm_struct *)tosya_lookup("init_mm");
-	g_kimage_voffset = (unsigned long *)tosya_lookup("kimage_voffset");
-	g_memstart_addr = (unsigned long *)tosya_lookup("memstart_addr");
-	g_set_fixmap_addr = tosya_lookup("__set_fixmap");
-	g_copy_nofault_addr = tosya_lookup("copy_to_kernel_nofault");
+	patch_mm = (struct mm_struct *)tosya_sym("init_mm");
+	g_kimage_voffset = (unsigned long *)tosya_sym("kimage_voffset");
+	g_memstart_addr = (unsigned long *)tosya_sym("memstart_addr");
+	g_set_fixmap_addr = tosya_sym("__set_fixmap");
+	g_copy_nofault_addr = tosya_sym("copy_to_kernel_nofault");
 	if (!g_copy_nofault_addr)
-		g_copy_nofault_addr = tosya_lookup("__copy_to_kernel_nofault");
-	g_copy_from_nofault_addr = tosya_lookup("copy_from_kernel_nofault");
+		g_copy_nofault_addr = tosya_sym("__copy_to_kernel_nofault");
+	g_copy_from_nofault_addr = tosya_sym("copy_from_kernel_nofault");
 	if (!g_copy_from_nofault_addr)
 		g_copy_from_nofault_addr =
-			tosya_lookup("__copy_from_kernel_nofault");
+			tosya_sym("__copy_from_kernel_nofault");
 	/* Stable arm64 signature across supported ACK trees; the implementation
 	 * owns its fixmap geometry, lock and instruction cache maintenance. */
-	g_patch_insn_addr = tosya_lookup("aarch64_insn_patch_text_nosync");
+	g_patch_insn_addr = tosya_sym("aarch64_insn_patch_text_nosync");
 	if (TOSYA_DEBUG_ON())
 		pr_info("tosya: init_mm=%px kimage_voffset=%px memstart_addr=%px set_fixmap=%px nofault=%px mod=%#lx-%#lx\n",
 			(void *)patch_mm, (void *)g_kimage_voffset,
@@ -444,8 +441,8 @@ struct patch_req {
 };
 
 /*
- * Physical address of a kernel address, by walking init_mm the way KernelSU's
- * patcher does. Kernel .rodata (where sys_call_table lives) is often mapped as a
+ * Physical address of a kernel address, by walking init_mm. Kernel .rodata (where
+ * sys_call_table lives) is often mapped as a
  * 2 MB block and the image as 1 GB blocks, so a block mapping is resolved to the
  * page inside it instead of being rejected. The page offset is part of the
  * result, which is what the fixmap copy wants.
@@ -583,10 +580,7 @@ static int patch_nosync(void *dst, const void *src, size_t len)
 	 * exactly -- and it is the only translation that works on a vendor kernel
 	 * whose struct mm_struct differs from the tree this module was built
 	 * against, which is where the walk gives up. The walk is the second opinion
-	 * then, and the fallback where the offset is not readable.
-	 */
-	/* A module address is not in the image, so the image offset cannot translate
-	 * it: the page-table walk is the only source there. */
+	 * then, and the fallback where the offset is not readable. */
 	if (g_mod_start && p >= g_mod_start && p < g_mod_end)
 		offset = 0;
 
@@ -635,7 +629,7 @@ static int patch_nosync(void *dst, const void *src, size_t len)
 		patch_set_fixmap(idx, phy, PAGE_KERNEL);
 
 		if (!g_copy_from_nofault_addr)
-			break; /* nothing to prove it with: the first alias is used */
+			break; // nothing to prove it with: the first alias is used
 		{
 			u8 seen[8], want[8];
 			const size_t n = len < sizeof(seen) ? len :
@@ -747,7 +741,7 @@ static int patch_insn_stopped(void *arg)
 			r->result = -EBUSY;
 		else
 			r->result = patch_native_insn(r->addr, r->replacement);
-		/* The native helper has finished its cache maintenance here. */
+		// The native helper has finished its cache maintenance here.
 		atomic_inc(&r->cpu_count);
 	} else {
 		while (atomic_read(&r->cpu_count) <= num_online_cpus())
@@ -808,8 +802,8 @@ int tosya_patch_text(void *dst, const void *src, size_t len, bool sync)
 	if (!len || (unsigned long)dst & 3 || len & 3)
 		return -EINVAL;
 	/* Refuse anything outside the kernel image before a single byte is written:
-	 * a wrong physical address used to be caught only by reading the target
-	 * back, which is too late -- the stray write has already happened. */
+	 * reading the target back afterwards is too late: the stray write has
+	 * already happened. */
 	if (!writable_range((unsigned long)dst, len)) {
 		pr_warn("tosya: refusing to patch: neither the kernel image nor this module\n");
 		if (TOSYA_DEBUG_ON())

@@ -11,13 +11,12 @@
  * same word as the TIF_* bits the rest of the kernel updates with set_bit() and
  * clear_bit(): so the word is moved with a compare-and-swap and only those bits
  * are touched, which is what the helpers at the top are.
- */
-/*
+ *
  * On the host the test compiles this file right after policy.c, which has
  * already pulled the shims in; including them again here would double-define
  * the statics in the sched shim. So the host build includes nothing.
  */
-#ifndef UIDFAKE_HOST_TEST
+#ifndef TOSYA_HOST_TEST
 #include <linux/atomic.h>
 #include <linux/cred.h>
 #include <linux/kernel.h>
@@ -50,7 +49,10 @@ static void tosya_ti_flags_rmw(struct task_struct *t, unsigned long clear,
 	} while (cmpxchg(p, old, new) != old);
 }
 
-static bool tosya_ti_mark_pending(struct task_struct *t)
+/*
+ * Mark one thread as waiting for a name; false when it is already named or already waiting.
+ */
+static bool tosya_ti_mark_pending_one(struct task_struct *t)
 {
 	unsigned long *p = (unsigned long *)&task_thread_info(t)->flags;
 	unsigned long old;
@@ -61,6 +63,25 @@ static bool tosya_ti_mark_pending(struct task_struct *t)
 			return false;
 	} while (cmpxchg(p, old, old | TOSYA_TAG_PENDING) != old);
 	return true;
+}
+
+/*
+ * Mark the whole thread group: identity belongs to the process, not to the thread that
+ * happened to see the uid change. Marking only that thread left native services (whose
+ * preload_lib runs on another thread) pending forever -- they were never named.
+ */
+static bool tosya_ti_mark_pending(struct task_struct *t)
+{
+	struct task_struct *thread;
+	bool marked = false;
+
+	rcu_read_lock();
+	for_each_thread(t, thread) {
+		if (tosya_ti_mark_pending_one(thread))
+			marked = true;
+	}
+	rcu_read_unlock();
+	return marked;
 }
 
 static u32 tosya_ti_tag(struct task_struct *t)
@@ -115,13 +136,13 @@ void tosya_tag_note(u32 before_sid, u32 after_sid, u32 old_uid, u32 new_uid)
 
 	if ((new_uid % 100000u) >= TOSYA_ISOLATED_START) {
 		/*
-     * An isolated child. Nothing in its own state names the app it belongs to:
-     * the context is shared, the supplementary groups are the pool's and its
-     * parent is the zygote. It is marked here so the first file it opens can
-     * name it; until one does it answers as a process with no rules of its own.
-     */
-		/* The mark, and nothing else: a name that arrives while this is in
-		 * flight is the answer this was racing, and it is never taken away. */
+		 * An isolated child. Nothing in its own state names the app it belongs to: the context is
+		 * shared, the supplementary groups are the pool's and its parent is the zygote. It is
+		 * marked here so the first file it opens can name it; until one does it answers as a
+		 * process with no rules of its own. The mark is the mark and nothing else: a name that
+		 * arrives while this is in flight is the answer this was racing, and it is never taken
+		 * away.
+		 */
 		if (tosya_ti_mark_pending(current))
 			pr_info("tosya: iso birth uid %u marked, awaiting the apk it opens\n",
 				new_uid);
@@ -139,18 +160,11 @@ void tosya_tag_note(u32 before_sid, u32 after_sid, u32 old_uid, u32 new_uid)
 	}
 }
 
-u32 tosya_tag_app(void)
-{
-	return (u32)((task_thread_info(current)->flags >> TOSYA_TAG_SHIFT) &
-		     TOSYA_TAG_MASK);
-}
-
 void tosya_tag_adopt(u32 old_uid, u32 new_uid)
 {
 	u32 app;
 
-	/* One shot, one transition: init/zygote giving an app uid to a fresh process.
-   */
+	// One shot, one transition: init/zygote giving an app uid to a fresh process.
 	if (tosya_ti_tag(current) != 0)
 		return;
 	/*
@@ -178,7 +192,7 @@ bool tosya_tag_pending_here(void)
 		TOSYA_TAG_PENDING) != 0;
 }
 
-/* ---- naming an isolated child from the apk it opens ---- */
+// ---- naming an isolated child from the apk it opens ----
 
 static bool tosya_tag_pending(void)
 {
@@ -223,7 +237,7 @@ static noinline void tosya_tag_verify(u32 tag)
 		return;
 	tosya_tag_group(tag);
 	if (tosya_ti_tag(current) != tag)
-		return; /* A concurrent close or another naming won this thread. */
+		return; // A concurrent close or another naming won this thread.
 	pr_info("tosya: iso uid %u belongs to app %u, from the apk it opened\n",
 		(u32)__kuid_val(current_fsuid()),
 		(u32)tag - 1u + TOSYA_APP_MIN);
@@ -243,8 +257,7 @@ void tosya_tag_name(u32 app)
  * The window is over and no apk named this one: it is an app without rules and
  * it answers as one. Saying so once is enough -- this is a normal outcome, not
  * a failure.
- */
-/*
+ *
  * Take the mark off, and only the mark: the tag field is not touched. A name set
  * while this was in flight is the answer this close was racing, and taking it away
  * would leave the process answering as one with no rules at all -- which is the exact
@@ -291,4 +304,4 @@ noinline void tosya_tag_close(void)
  */
 #define TOSYA_DIR_DEPTH 4
 
-/* ---- table patching ---- */
+// ---- table patching ----

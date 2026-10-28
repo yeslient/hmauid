@@ -11,7 +11,7 @@
 #define TOSYA_BL 0x94000000u
 #define TOSYA_ADRP 0x90000000u
 #define TOSYA_ADR 0x10000000u
-#define TOSYA_INSNS (TOSYA_INLINE_MAX_SOURCE / TOSYA_INLINE_INSN)
+#define TOSYA_INSNS (TOSYA_INLINE_MAX_FUNC / TOSYA_INLINE_INSN)
 
 #ifdef TOSYA_INLINE_DEBUG
 unsigned int tosya_inline_dbg_insn;
@@ -26,7 +26,7 @@ static long tosya_sx(unsigned int value, unsigned int bits)
 	return (long)(value & (sign - 1)) - (long)(value & sign);
 }
 
-/* Unsigned VA arithmetic also works in the upper half of the address space. */
+// Unsigned VA arithmetic also works in the upper half of the address space.
 static int tosya_displacement(unsigned long site, unsigned long target,
 			      unsigned int shift, unsigned int bits, long *imm)
 {
@@ -81,7 +81,7 @@ static void tosya_mov_imm(unsigned int *out, unsigned int rd,
 			 rd;
 }
 
-/* All immediate branch classes; bit 4 of B.cond is FEAT_HBC's BC.cond. */
+// All immediate branch classes; bit 4 of B.cond is FEAT_HBC's BC.cond.
 static unsigned int tosya_branch_bits(unsigned int insn)
 {
 	if ((insn & 0x7c000000u) == TOSYA_B)
@@ -104,8 +104,7 @@ static unsigned long tosya_branch_target(unsigned int insn, unsigned int bits,
 }
 
 struct tosya_layout {
-	unsigned short
-		out[TOSYA_INSNS]; /* byte offsets; no consumed instructions */
+	unsigned short out[TOSYA_INSNS]; // byte offsets; no consumed instructions
 	size_t size;
 };
 
@@ -175,7 +174,7 @@ int tosya_inline_entry(void *out, size_t out_size, unsigned long site_va,
 		return TOSYA_INLINE_ESIZE;
 	if (tosya_branch_encode(&encoded, TOSYA_B, 26, site_va, hook_va))
 		return TOSYA_INLINE_ERANGE;
-	/* The output buffer is required to have instruction alignment. */
+	// The output buffer is required to have instruction alignment.
 	if ((unsigned long)out & 3UL)
 		return TOSYA_INLINE_EINSN;
 	*(unsigned int *)out = encoded;
@@ -210,7 +209,7 @@ int tosya_inline_relocate(void *to, size_t to_size, const void *from,
 
 	/* Validate every branch before writing anything to the destination. In
 	 * particular external calls stay direct: BLR would impose a new BTI
-	 * requirement on a formerly direct-only target and clobber x16/x17. */
+	 * requirement on a direct-only target and clobber x16/x17. */
 	for (i = 0; i < words; i++) {
 		const unsigned int bits = tosya_branch_bits(src[i]);
 		unsigned int encoded;
