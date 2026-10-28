@@ -4,5 +4,7 @@
 MODDIR=${0%/*}
 LOG="$MODDIR/state/sync.log"
 mkdir -p "$MODDIR/state"
+chmod 700 "$MODDIR/state"
+touch "$LOG" && chmod 600 "$LOG"
 . "$MODDIR/load.sh"
 tosya_load "$MODDIR" >>"$LOG" 2>&1

@@ -4,6 +4,10 @@
 MODDIR=${0%/*}
 LOG="$MODDIR/state/sync.log"
 mkdir -p "$MODDIR/state"
+# The log names every caller, target and preset; keep both root-only instead of
+# whatever the filesystem hands a fresh directory.
+chmod 700 "$MODDIR/state"
+touch "$LOG" && chmod 600 "$LOG"
 . "$MODDIR/load.sh"
 tosya_load "$MODDIR" >>"$LOG" 2>&1
 

@@ -10,6 +10,9 @@
   against.
 - `module.prop`'s fallback version is 0.5.0/5000 instead of 0.1.0/1000. A source tree without a git
   tag used to build a package the manager reads as older than 0.4.0.
+- `state/` and `state/sync.log` are kept at 0700/0600 from both boot scripts. The log names every
+  caller, target and preset in plain text, and a fresh directory otherwise lands at 0777/0666 --
+  unreadable to apps through /data/adb itself, but open to anything else that already holds root.
 
 ## 0.5.0
 
