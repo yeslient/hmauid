@@ -188,6 +188,123 @@ std::optional<std::uint16_t> NetlinkClient::resolve_family() {
   return std::nullopt;
 }
 
+bool NetlinkClient::send_command(std::uint8_t cmd,
+                                 std::span<const std::byte> blob) {
+  if (!ensure_connected())
+    return false;
+
+  if (!family_) {
+    const auto resolved = resolve_family();
+    if (!resolved)
+      return false;
+    family_ = resolved;
+  }
+
+  Buffer request{};
+  request.bytes.assign(NLMSG_SPACE(GENL_HDRLEN) +
+                           NLA_ALIGN(NLA_HDRLEN + blob.size()),
+                       std::byte{0});
+
+  auto *nlh = request.nlmsg();
+  nlh->nlmsg_len =
+      NLMSG_LENGTH(GENL_HDRLEN + NLA_HDRLEN + static_cast<int>(blob.size()));
+  nlh->nlmsg_type = *family_;
+  nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+  nlh->nlmsg_seq = ++seq_;
+
+  auto *genl = request.genlmsg();
+  genl->cmd = cmd;
+  genl->version = KAUX_FAMILY_VERSION;
+
+  auto *attr = reinterpret_cast<nlattr *>(reinterpret_cast<std::byte *>(genl) +
+                                          GENL_HDRLEN);
+  attr->nla_type = KAUX_ATTR_BLOB;
+  attr->nla_len = NLA_HDRLEN + static_cast<int>(blob.size());
+  std::memcpy(reinterpret_cast<std::byte *>(attr) + NLA_HDRLEN, blob.data(),
+              blob.size());
+
+  std::vector<std::byte> reply(kReplySize);
+  return exchange(std::span{request.bytes}.first(nlh->nlmsg_len), reply);
+}
+
+std::optional<kaux_status> NetlinkClient::status() {
+  if (!ensure_connected())
+    return std::nullopt;
+  if (!family_) {
+    const auto resolved = resolve_family();
+    if (!resolved)
+      return std::nullopt;
+    family_ = resolved;
+  }
+
+  Buffer request{};
+  request.bytes.assign(NLMSG_SPACE(GENL_HDRLEN), std::byte{0});
+  auto *nlh = request.nlmsg();
+  nlh->nlmsg_len = NLMSG_LENGTH(GENL_HDRLEN);
+  nlh->nlmsg_type = *family_;
+  nlh->nlmsg_flags = NLM_F_REQUEST;
+  nlh->nlmsg_seq = ++seq_;
+  request.genlmsg()->cmd = KAUX_CMD_STATUS;
+  request.genlmsg()->version = KAUX_FAMILY_VERSION;
+
+  std::vector<std::byte> reply(kReplySize);
+  unsupported_ = false;
+  if (!exchange(std::span{request.bytes}.first(nlh->nlmsg_len), reply)) {
+    if (unsupported_)
+      Log::warn("the loaded module does not know KAUX_CMD_STATUS; it is older "
+                "than this tool (a reboot loads the new one)");
+    return std::nullopt;
+  }
+
+  const auto view = std::span<const std::byte>(reply.data(), reply_bytes_);
+  int left = static_cast<int>(view.size());
+  for (const std::byte *cursor = view.data();
+       nlmsg_ok(reinterpret_cast<const nlmsghdr *>(cursor), left);) {
+    const auto *header = reinterpret_cast<const nlmsghdr *>(cursor);
+    const int step = static_cast<int>(NLMSG_ALIGN(header->nlmsg_len));
+    if (header->nlmsg_type != NLMSG_ERROR && header->nlmsg_seq == seq_) {
+      const auto *genl =
+          reinterpret_cast<const genlmsghdr *>(NLMSG_DATA(header));
+      int attr_left = static_cast<int>(header->nlmsg_len) -
+                      static_cast<int>(NLMSG_LENGTH(GENL_HDRLEN));
+      const auto *attr = reinterpret_cast<const nlattr *>(
+          reinterpret_cast<const std::byte *>(genl) + GENL_HDRLEN);
+      for (; nlattr_ok(attr, attr_left); attr = nlattr_next(attr)) {
+        const int alen = static_cast<int>(attr->nla_len) - NLA_HDRLEN;
+        attr_left -= static_cast<int>(NLA_ALIGN(attr->nla_len));
+        if (attr->nla_type != KAUX_ATTR_STATUS)
+          continue;
+        if (alen != static_cast<int>(sizeof(kaux_status))) {
+          Log::warn("status of {} byte(s), expected {}", alen,
+                    sizeof(kaux_status));
+          return std::nullopt;
+        }
+        kaux_status st{};
+        std::memcpy(&st, reinterpret_cast<const std::byte *>(attr) + NLA_HDRLEN,
+                    sizeof(st));
+        if (st.magic != KAUX_STATUS_MAGIC || st.size != sizeof(st) ||
+            st.version != KAUX_FAMILY_VERSION) {
+          Log::warn(
+              /* No release number in here: the protocol version is what has to
+               * match, and saying which one this tool speaks is enough for a
+               * reader to act on. */
+              "status does not look like ours (magic {:x}, size {}, version "
+              "{}); this tool "
+              "speaks version {}, so module and tool have to come from the "
+              "same build",
+              st.magic, st.size, st.version, KAUX_FAMILY_VERSION);
+          return std::nullopt;
+        }
+        return st;
+      }
+      break;
+    }
+    left -= step;
+    cursor += step;
+  }
+  return std::nullopt;
+}
+
 bool NetlinkClient::ensure_connected() {
   if (socket_.valid())
     return true;
