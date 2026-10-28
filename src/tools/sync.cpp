@@ -104,8 +104,7 @@ constexpr std::size_t kApkLimit = 10000;
  * once per installation, kept beside the log, and pushed ahead of every names
  * stream. A new token re-masks every published name, so it must not change
  * behind the kernel's back mid-run. */
-[[nodiscard]] std::optional<std::array<std::uint32_t, 4>>
-installation_token() {
+[[nodiscard]] std::optional<std::array<std::uint32_t, 4>> installation_token() {
   const auto dir = module_dir();
   if (dir.empty())
     return std::nullopt;

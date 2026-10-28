@@ -265,8 +265,8 @@ bool NetlinkClient::stream(std::uint32_t kind,
           ++count;
         }
         if (count == 0) {
-          Log::warn("{}: a record of {} byte(s) does not fit one batch",
-                    what, records[at].size());
+          Log::warn("{}: a record of {} byte(s) does not fit one batch", what,
+                    records[at].size());
           ok = false;
           break;
         }
@@ -332,12 +332,15 @@ bool NetlinkClient::refresh() {
 }
 
 bool NetlinkClient::push_token(std::span<const std::uint32_t, 4> words) {
-  /* Four words and nothing else: the count header the batch format carries is
-   * the kernel's cue that none of them is a count. */
-  std::vector<std::byte> record(4 * sizeof(std::uint32_t));
-  for (std::size_t i = 0; i < 4; ++i)
-    store_u32(record, i * sizeof(std::uint32_t), words[i]);
-  return stream(KAUX_KIND_TOKEN, std::span{&record, 1}, "the token");
+  /* The kernel reads a token batch as four one-word records after the count
+   * header, and refuses anything else: count must be 4 and the blob must be
+   * five words. One record per word, so the packed batch is exactly that. */
+  std::vector<std::byte> records[4];
+  for (std::size_t i = 0; i < 4; ++i) {
+    records[i].resize(sizeof(std::uint32_t));
+    store_u32(records[i], 0, words[i]);
+  }
+  return stream(KAUX_KIND_TOKEN, records, "the token");
 }
 
 bool NetlinkClient::push(std::span<const Pair> pairs) {
