@@ -388,32 +388,27 @@ void Syncer::sync_now(std::string_view why) {
     const auto same_name = [](const HiddenName &a, const HiddenName &b) {
       return a.caller == b.caller && a.name == b.name;
     };
-    bool names_changed =
+    const bool names_changed =
         !names_pushed_ || !std::ranges::equal(names, pushed_names_, same_name);
+    /* Nothing in this block may exit the function: the apk table at the end
+     * of the pass is not derived from the names, and leaving early froze it
+     * for every pass whose names happened to be unchanged -- an app installed
+     * after boot then never registered its apk. */
     const auto token = installation_token();
     if (!token) {
       watcher_.arm_retry();
-      return;
-    }
-    /* A regenerated token re-derives every mask at publication, so the names
-     * have to be republished under it even when the set itself is unchanged. */
-    if (!pushed_token_ || *pushed_token_ != *token)
-      names_changed = true;
-    if (!names_changed) {
-      /* Nothing to republish -- but the callers and the apk table below still
-       * have to run: this used to be a bare return, and every newly installed
-       * app whose names did not change stopped reaching publish_code_dirs(),
-       * leaving its isolated processes untagged and fail-open. */
-    } else if (!token) {
-      /* No token, no names push -- but the apk table below is independent. */
-      watcher_.arm_retry();
-    } else if (!netlink_.push_token(*token)) {
-      watcher_.arm_retry();
-      return;
-    } else if (!netlink_.push_names(names)) {
-      watcher_.arm_retry();
-      return;
-    } else {
+    } else if (names_changed || !pushed_token_ || *pushed_token_ != *token) {
+      /* A regenerated token re-derives every mask at publication, so the
+       * names have to be republished under it even when the set itself is
+       * unchanged. */
+      if (!netlink_.push_token(*token)) {
+        watcher_.arm_retry();
+        return;
+      }
+      if (!netlink_.push_names(names)) {
+        watcher_.arm_retry();
+        return;
+      }
       pushed_names_.assign(names.begin(), names.end());
       names_pushed_ = true;
       pushed_token_ = token;
