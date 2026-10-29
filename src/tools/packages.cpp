@@ -254,8 +254,6 @@ PackageDb::load(const std::filesystem::path &xml_path) {
   const bool readable = read(reader);
   if (!readable)
     return std::nullopt;
-  if (!readable)
-    return std::nullopt;
   if (db.by_name_.empty()) {
     Log::warn("{} lists no package", xml_path.string());
     return std::nullopt;
@@ -321,7 +319,11 @@ Pairs expand_users(const Pairs &pairs,
       /* The kernel drops a system uid as a target; it is one in no user. */
       if (pair.target < kFirstAppUid)
         continue;
+      /* Both sides have to fit: a wrapped caller would hand the rule to
+       * whatever app happens to hold the truncated uid. */
       if (base + pair.target > 0xffffffffull)
+        continue;
+      if (pair.caller != 0 && base + pair.caller > 0xffffffffull)
         continue;
       out.push_back(
           Pair{.caller = pair.caller == 0

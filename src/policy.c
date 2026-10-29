@@ -580,7 +580,7 @@ static int layout_targets(struct layout *l, struct apply_pair *p, u32 n,
 	return 0;
 
 fail:
-	kfree(masks);
+	kvfree(masks);
 	kfree(tgt);
 	return -1;
 }
@@ -590,7 +590,7 @@ static void policy_release(struct policy *p)
 	if (!p || p == &g_empty)
 		return;
 	kfree(p->tgt);
-	kfree(p->mask_pool);
+	kvfree(p->mask_pool);
 	kfree(p->cid);
 	kfree(p);
 }
@@ -640,6 +640,9 @@ void policy_apply(const u32 *pairs, u32 npairs)
 		tmp[n].target = target;
 		n++;
 	}
+	if (i < npairs)
+		pr_warn("tosya: policy of %u pair(s) truncated to the %u the table holds\n",
+			npairs, n);
 
 	/* No target remains after filtering: publish the existing empty snapshot.
 	 * The target builder requires at least one target before interning a mask. */

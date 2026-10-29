@@ -83,7 +83,10 @@ static int kaux_begin(struct sk_buff *skb, struct genl_info *info)
 	if (rc || len < sizeof(*b))
 		return -EINVAL;
 	b = (const struct kaux_begin *)p;
-	if (b->kind > KAUX_KIND_MAX)
+	/* Exact set: kinds 2 and 3 are holes in the enum, and a stream opened on
+	 * a hole would claim the owner slot before its first batch is refused. */
+	if (b->kind != KAUX_KIND_POLICY && b->kind != KAUX_KIND_APKS &&
+	    b->kind != KAUX_KIND_TOKEN && b->kind != KAUX_KIND_NAMES)
 		return -EINVAL;
 
 	mutex_lock(&g_apply_lock);

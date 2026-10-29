@@ -40,6 +40,9 @@ tosya_load() {
     echo "[load] module not loaded; see the loader error above"
     return 1
   fi
-  touch "$marker" && chmod 600 "$marker"
+  # Touch and the mode are separate on purpose: a chmod failure must not read
+  # as "not loaded" and provoke a second insmod over a live instance.
+  touch "$marker"
+  chmod 600 "$marker" 2>/dev/null || true
   return 0
 }

@@ -295,12 +295,16 @@ void Syncer::sync_now(std::string_view why) {
   }
   /* A user appearing or leaving changes which /data/user/<u> parents exist.
    * The names END re-resolves them; this covers the window where the users
-   * changed and the names did not. */
+   * changed and the names did not. The stamp commits only on success, so a
+   * failed refresh is retried by the next pass instead of being swallowed. */
   if (users_seen_ && *users_seen_ != users->size() && names_pushed_) {
     if (!netlink_.refresh())
       watcher_.arm_retry();
+    else
+      users_seen_ = users->size();
+  } else if (!users_seen_) {
+    users_seen_ = users->size();
   }
-  users_seen_ = users->size();
 
   const auto opened = open_rules(*file, *packages);
   if (!opened) {
@@ -384,21 +388,31 @@ void Syncer::sync_now(std::string_view why) {
     const auto same_name = [](const HiddenName &a, const HiddenName &b) {
       return a.caller == b.caller && a.name == b.name;
     };
-    if (!names_pushed_ ||
-        !std::ranges::equal(names, pushed_names_, same_name)) {
-      const auto token = installation_token();
-      if (!token || !netlink_.push_token(*token)) {
-        watcher_.arm_retry();
-        return;
-      }
-      if (!netlink_.push_names(names)) {
-        watcher_.arm_retry();
-        return;
-      }
-      pushed_names_.assign(names.begin(), names.end());
-      names_pushed_ = true;
-      Log::info("synced {} hidden name(s) ({})", names.size(), why);
+    bool names_changed =
+        !names_pushed_ || !std::ranges::equal(names, pushed_names_, same_name);
+    const auto token = installation_token();
+    if (!token) {
+      watcher_.arm_retry();
+      return;
     }
+    /* A regenerated token re-derives every mask at publication, so the names
+     * have to be republished under it even when the set itself is unchanged. */
+    if (!pushed_token_ || *pushed_token_ != *token)
+      names_changed = true;
+    if (!names_changed)
+      return;
+    if (!netlink_.push_token(*token)) {
+      watcher_.arm_retry();
+      return;
+    }
+    if (!netlink_.push_names(names)) {
+      watcher_.arm_retry();
+      return;
+    }
+    pushed_names_.assign(names.begin(), names.end());
+    names_pushed_ = true;
+    pushed_token_ = token;
+    Log::info("synced {} hidden name(s) ({})", names.size(), why);
   }
 
   std::set<std::uint32_t> caller_uids;
@@ -462,6 +476,7 @@ bool Syncer::publish_code_dirs() {
     }
   }
 
+  std::size_t stat_missed = 0;
   for (const auto &[name, uid] : wanted) {
     auto dir = code_dirs_.find(name);
     if (dir == code_dirs_.end() && packages_) {
@@ -489,8 +504,12 @@ bool Syncer::publish_code_dirs() {
     if (!seen.insert(apk.string()).second)
       continue;
     struct stat info{};
-    if (::stat(apk.c_str(), &info) != 0)
+    if (::stat(apk.c_str(), &info) != 0) {
+      /* Not fatal for the batch, but silent would mean an identity that never
+       * comes back: say it, so a missing registration can be explained. */
+      ++stat_missed;
       continue;
+    }
     if (entries.size() >= kApkLimit)
       break;
     entries.push_back(ApkEntry{.path = apk.string(),
@@ -498,6 +517,10 @@ bool Syncer::publish_code_dirs() {
                                .dev = static_cast<std::uint32_t>(info.st_dev),
                                .ino = static_cast<std::uint64_t>(info.st_ino)});
   }
+  if (stat_missed != 0)
+    Log::warn("{} apk file(s) could not be stat'ed; they stay unregistered "
+              "until a later sync re-reads them",
+              stat_missed);
 
   const auto id_of = [](const ApkEntry &entry) {
     return ApkId{entry.dev, entry.ino};
@@ -550,7 +573,10 @@ bool Syncer::publish_code_dirs() {
       published_.insert_or_assign(id_of(entry),
                                   PublishedApk{entry, ApkPhase::Adding});
     if (!netlink_.push_apks(batch))
-      return AddResult::Unreachable;
+      /* A refusal means the kernel is there and said no -- later entries in
+       * the recovering loop still get their own attempt. Calling it
+       * unreachable would starve everything behind the first refusal. */
+      return netlink_.refused() ? AddResult::Failed : AddResult::Unreachable;
     const auto st = netlink_.status();
     if (!st || st->apk_offered != batch.size())
       return AddResult::Unreachable;
@@ -610,18 +636,20 @@ void Syncer::handle_packages(const std::vector<std::string> &dirs) {
     const auto base = std::filesystem::path{kAppRoot} / name;
     std::error_code ec;
     if (std::filesystem::is_directory(base, ec)) {
-      for (const auto &entry : std::filesystem::directory_iterator{base, ec}) {
-        if (ec)
-          break;
-        if (!entry.is_directory(ec))
+      /* Explicit increment with the error_code overload: the throwing
+       * range-for would take the daemon down on a readdir failure. */
+      std::filesystem::directory_iterator it{base, ec};
+      for (std::filesystem::directory_iterator end; !ec && it != end;
+           it.increment(ec)) {
+        if (!it->is_directory(ec))
           continue;
-        const auto leaf = entry.path().filename().string();
+        const auto leaf = it->path().filename().string();
         const auto caller = std::ranges::find_if(callers_, [&](const auto &c) {
           return dir_matches(leaf, c.first);
         });
         if (caller == callers_.end())
           continue;
-        code_dirs_.insert_or_assign(caller->first, entry.path());
+        code_dirs_.insert_or_assign(caller->first, it->path());
         changed = true;
       }
     } else {

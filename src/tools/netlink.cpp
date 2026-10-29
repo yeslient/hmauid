@@ -113,6 +113,9 @@ bool NetlinkClient::exchange(std::span<const std::byte> request,
          * worth telling apart from a module that is not there at all. */
         if (error->error == -EOPNOTSUPP || error->error == -EPROTONOSUPPORT)
           unsupported_ = true;
+        /* Any kernel answer that is an error is a refusal, not a transport
+         * failure: the module is there, reachable, and said no. */
+        refused_ = true;
         Log::warn("netlink error: {}", std::strerror(-error->error));
         return false;
       }
@@ -199,6 +202,9 @@ bool NetlinkClient::send_command(std::uint8_t cmd,
       return false;
     family_ = resolved;
   }
+  /* One command, one verdict: a refusal the next exchange reports must not be
+   * a stale one from the command before it. */
+  refused_ = false;
 
   Buffer request{};
   request.bytes.assign(NLMSG_SPACE(GENL_HDRLEN) +
@@ -418,8 +424,12 @@ bool NetlinkClient::stream(std::uint32_t kind,
 
   if (!warned_) {
     warned_ = true;
-    Log::warn("kernel side unreachable, {} not updated", what);
-    report_status("kernel unreachable");
+    if (refused_)
+      Log::warn("kernel refused {}, keeping the previous state", what);
+    else
+      Log::warn("kernel side unreachable, {} not updated", what);
+    report_status(refused_ ? "kernel refused the update"
+                           : "kernel unreachable");
   }
   return false;
 }

@@ -81,6 +81,11 @@ public:
   /* True when the kernel refused a command it does not know: the module that is
    * loaded was built before the command existed. */
   [[nodiscard]] bool unsupported() const { return unsupported_; }
+  /* True when the last failure was a refusal the kernel answered with (an
+   * NLMSG_ERROR arrived), as opposed to the module not being reachable at all.
+   * The caller treats these differently: a refusal is per-record/per-stream
+   * state the next pass can make progress on, an unreachable kernel is not. */
+  [[nodiscard]] bool refused() const { return refused_; }
 
 private:
   static constexpr std::string_view kFamilyName = KAUX_FAMILY_NAME;
@@ -108,6 +113,7 @@ private:
   /* Bytes the last exchange received, so a reply can be walked. */
   std::size_t reply_bytes_ = 0;
   bool unsupported_ = false;
+  bool refused_ = false;
 
   Fd socket_;
   std::optional<std::uint16_t> family_;

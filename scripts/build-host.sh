@@ -18,12 +18,12 @@ mkdir -p "$(dirname "$out")"
 # C++23 <print> needs GCC 14 or newer; the default g++ on ubuntu-24.04 is 13.
 CXX="${CXX:-g++}"
 "$CXX" -std=c++23 -Wall -Wextra \
-	-I src/tools -I src/include -I scripts/hosttest \
-	src/tools/abx.cpp src/tools/text_xml.cpp src/tools/packages_xml.cpp \
-	src/tools/main.cpp src/tools/sync.cpp src/tools/watcher.cpp \
-	src/tools/netlink.cpp src/tools/status.cpp src/tools/rules.cpp \
-	src/tools/preset_rules.cpp src/tools/packages.cpp src/tools/paths.cpp \
-	scripts/hosttest/android_props_stub.cpp \
-	-o "$out" -ldl -lz
+  -I src/tools -I src/include -I scripts/hosttest \
+  src/tools/abx.cpp src/tools/text_xml.cpp src/tools/packages_xml.cpp \
+  src/tools/main.cpp src/tools/sync.cpp src/tools/watcher.cpp \
+  src/tools/netlink.cpp src/tools/status.cpp src/tools/rules.cpp \
+  src/tools/preset_rules.cpp src/tools/packages.cpp src/tools/paths.cpp \
+  scripts/hosttest/android_props_stub.cpp \
+  -o "$out" -ldl -lz
 
 echo "host build: $out"

@@ -29,9 +29,37 @@
   swapped. They are two statements now.
 - The package job's version override still said `0.5.0+ci.N` / `5000+N` while the tree is 0.7.0; it
   says `0.7.0+ci.N` / `7000+N` now, matching the fallback in module.prop.
-- The lookup_fast hook's constant-time probe (a non-short-circuiting compare over a fixed number of
-  slots, so hidden and never-installed cost the same) stays as published: short-circuiting it would
-  be the timing oracle the design is arguing against.
+- Two independent cold reads of the whole tree (kernel+CI, userspace+scripts) came back; everything
+  they found that survived verification is fixed here:
+  - main.c: the netlink error return introduced with this port was not clean after all --
+    `tosya_dir_init()` runs earlier and puts the module's private inode_operations on the protected
+    parents, so a failed init freed the module under live inodes. Netlink now registers before the
+    directory side, where the error return really is clean, and the wrong comment says so.
+  - policy.c: the kvcalloc'ed mask pool was still released with kfree -- corruption as soon as the
+    pool actually lands in vmalloc. Both release paths are kvfree now, and a policy longer than the
+    table warns instead of truncating in silence.
+  - netlink.c: BEGIN validates the exact set of stream kinds (2 and 3 are holes in the enum; a stream
+    opened on a hole claimed the owner slot before its first batch was refused).
+  - sync.cpp: a failed user-list refresh committed its stamp anyway and was never retried (the stamp
+    commits on success now); a kernel per-record refusal was reported as "kernel unreachable", which
+    starved every later apk add behind the first refusal (the client now distinguishes refused from
+    unreachable); a regenerated token never republished the names whose masks it re-derives (the
+    token has its own ledger now); a stat that failed left the apk unregistered with no word and no
+    retry (it warns and the next sync re-reads); the throwing directory_iterator range-for took the
+    daemon down on a readdir failure (error_code increment instead).
+  - packages.cpp: `expand_users` guarded target overflow but let a wrapped caller through -- a hide
+    rule silently handed to an unrelated app uid. Both sides are checked now, and a duplicated
+    readable check from an old edit is gone.
+  - load.sh: `touch && chmod` conflated marker creation with its mode -- a chmod failure read as "not
+    loaded" and provoked a second insmod over a live instance. They are separate now.
+  - status.cpp: the /proc/config.gz parser's stoul could throw past the daemon's catch on a long
+    digit run; it is bounded first.
+- Known and left as published: the policy hash word is rewritten outside RCU during an apply (a
+  transient wrong-bucket window, no bounds violation), retired name sets are retained until unload
+  (bounded by how often the name set actually changes), the apk index rebuild reports ENOMEM without
+  unwinding its staging (reachable only under memory pressure), and the module-list self-removal
+  races /proc walkers for a window every boot -- all upstream design or upstream-bounded; changing
+  them without a kernel to test against carries more risk than the disease.
 
 ## 0.7.0-1: the 0.7.0 port
 

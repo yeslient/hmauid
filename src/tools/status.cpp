@@ -50,7 +50,7 @@ std::optional<unsigned int> config_value(const std::string &text,
     const std::size_t begin = at + prefix.size();
     const std::size_t end = text.find('\n', begin);
     const std::string value = text.substr(begin, end - begin);
-    if (!value.empty() &&
+    if (!value.empty() && value.size() <= 9 &&
         value.find_first_not_of("0123456789") == std::string::npos)
       return static_cast<unsigned int>(std::stoul(value));
   }
