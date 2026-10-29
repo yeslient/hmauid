@@ -20,6 +20,15 @@
   - `policy_apply()` allocated the mask pool with kcalloc: at the documented ceiling that is ~33 MB
     of physically contiguous memory, which fails -- the documented limits were unreachable together.
     It is kvcalloc now.
+- The tool now also compiles and links on a plain host in CI (the host-build job,
+  `scripts/build-host.sh`, with the NDK's property header stubbed under `scripts/hosttest/sys/`):
+  the link is exhaustive where a review is not, so a method declared in netlink.hpp but missing from
+  netlink.cpp costs a minute here instead of a full kernel matrix, and it can no longer reach the
+  package at all. The first host compile found a real one: `parse_args` read both `--explain`
+  operands as `argv[++i]` in a single expression -- unsequenced, so CALLER and TARGET could come out
+  swapped. They are two statements now.
+- The package job's version override still said `0.5.0+ci.N` / `5000+N` while the tree is 0.7.0; it
+  says `0.7.0+ci.N` / `7000+N` now, matching the fallback in module.prop.
 - The lookup_fast hook's constant-time probe (a non-short-circuiting compare over a fixed number of
   slots, so hidden and never-installed cost the same) stays as published: short-circuiting it would
   be the timing oracle the design is arguing against.

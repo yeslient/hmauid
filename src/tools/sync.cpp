@@ -154,8 +154,11 @@ std::optional<Config> parse_args(int argc, char **argv) {
     } else if (arg == "--list" && i + 1 < argc) {
       config.list = std::string{argv[++i]};
     } else if (arg == "--explain" && i + 2 < argc) {
-      config.explain =
-          std::pair{std::string{argv[++i]}, std::string{argv[++i]}};
+      /* Two argv[++i] in one expression would be unsequenced: read the two
+       * operands as statements, or CALLER and TARGET can come out swapped. */
+      const auto caller = std::string{argv[++i]};
+      const auto target = std::string{argv[++i]};
+      config.explain = std::pair{std::move(caller), std::move(target)};
     } else {
       std::fprintf(
           stderr,
