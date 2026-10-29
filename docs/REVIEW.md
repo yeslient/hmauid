@@ -72,6 +72,27 @@ carries).
   CHANGELOG.md with the reason. The next round then does not re-litigate them
   or "fix" them into a regression.
 
+## 6. Acceptance criteria bind status to mechanism
+
+- A status counter can look healthy while the mechanism it reports is dead:
+  the directory guard's count stays nonzero when the lookup_fast hook install
+  fails, because the install failure only pr_warns. An acceptance criterion
+  that reads the counter alone passes a broken mechanism ("green but broken").
+  Every status field must be paired with the absence-check of the warn lines
+  that its failure mode prints (here: "the fast walk is not filtered", "the
+  inode unlock hook is not in place", "the inode reclaim hook is not in
+  place") -- the pair is the criterion, either half alone is not.
+
+## 7. Self-hiding components own their liveness probe
+
+- A component that removes itself from the module list (or any registry) breaks
+  every management tool that asks that registry "are you loaded?" -- including
+  its own boot scripts, silently, on every boot. The liveness probe must be
+  designed with the hiding (a marker file, a family probe), never bolted on
+  from lsmod-style asks afterwards; and any NEW management code inherits the
+  constraint, so the constraint is documented next to the hiding, not in the
+  scripts.
+
 ## 6. Hygiene rules that each earned their place the hard way
 
 - Include-path hygiene: adding an `-I` directory can shadow system headers. A
