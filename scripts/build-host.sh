@@ -15,7 +15,9 @@ cd "$(dirname "$0")/.."
 out="${1:-build/tools-host/sync-tool-host}"
 mkdir -p "$(dirname "$out")"
 
-g++ -std=c++23 -Wall -Wextra \
+# C++23 <print> needs GCC 14 or newer; the default g++ on ubuntu-24.04 is 13.
+CXX="${CXX:-g++}"
+"$CXX" -std=c++23 -Wall -Wextra \
 	-I src/tools -I src/include -I scripts/hosttest \
 	src/tools/abx.cpp src/tools/text_xml.cpp src/tools/packages_xml.cpp \
 	src/tools/main.cpp src/tools/sync.cpp src/tools/watcher.cpp \

@@ -178,9 +178,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y g++ nlohmann-json3-dev zlib1g-dev
+          # C++23 <print> needs GCC 14; ubuntu-24.04's default g++ is 13.
+          sudo apt-get install -y g++-14 nlohmann-json3-dev zlib1g-dev
       - name: Compile and link sync-tool for the host
-        run: bash scripts/build-host.sh
+        run: CXX=g++-14 bash scripts/build-host.sh
       - name: Smoke
         run: |
           out=$(build/tools-host/sync-tool-host --bogus 2>&1) || rc=$?
