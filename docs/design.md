@@ -251,8 +251,11 @@ the running kernel's config (`/proc/config.gz`).
   each target. Replacement selection uses `csel`, reducing branches on the hiding decision.
   Caller lookup, identity handling, and the native UID lookup still have their own control flow.
   `scripts/lookup_model.py` models policy table accesses, not total kernel execution time.
-- Replacements come from 20001..24096 and are checked for absence when the policy is applied.
-  That check is a snapshot, so the inline path must retain its live-replacement collision guard.
+- Replacements are drawn from a dedicated range above the app uids: make_replace() folds the
+  target's uid-hash bucket into a base above the app span -- 20096..20223 on a 7-bit uid hash,
+  20224..20479 on an 8-bit one. Nothing checks the replacement for absence when the policy is
+  applied; the inline path retains its live-replacement collision guard instead, and the ranges sit
+  where Android allocates no uids.
 - The inline entry accepts a normal function argument and does not rewrite syscall `pt_regs`.
 - The kernel only compares numbers; whatever needs a path, a package name or JSON happens in
   `sync-tool`, and what arrives is checked for shape and size.
@@ -278,11 +281,13 @@ the running kernel's config (`/proc/config.gz`).
 Little endian, defined once in `include/kaux.h`, which the module and the tool both include. The
 family is named after the module, `tosya`, because generic netlink families share one
 namespace: a generic name could be taken by another module, and the tool resolves the family by name,
-so it would then be talking to that module. The family version is 4 and the kernel rejects a request
+so it would then be talking to that module. The family version is 7 and the kernel rejects a request
 that does not carry it, so a helper and a module of different versions cannot read each other's
-command ids. It was 3 through 0.3.x; 4 renamed the family and put one mechanism name per family in
-the status, which changed the structure's size, and the tool checks the status's magic, size and
-version before it believes anything in it.
+command ids. The revisions this tree has carried: 3 was never published; 4 renamed the family and
+put one mechanism name per family in the status, which changed the structure's size; 5 staged whole
+blobs behind a CRC; 6 moved to per-record streams with a token; 7 added the hidden-name stream and
+the refresh command. The tool checks the status's magic, size and version before it believes
+anything in it.
 
 ```
 KAUX_CMD_PING         (1)  no payload, ACK only

@@ -399,20 +399,26 @@ void Syncer::sync_now(std::string_view why) {
      * have to be republished under it even when the set itself is unchanged. */
     if (!pushed_token_ || *pushed_token_ != *token)
       names_changed = true;
-    if (!names_changed)
-      return;
-    if (!netlink_.push_token(*token)) {
+    if (!names_changed) {
+      /* Nothing to republish -- but the callers and the apk table below still
+       * have to run: this used to be a bare return, and every newly installed
+       * app whose names did not change stopped reaching publish_code_dirs(),
+       * leaving its isolated processes untagged and fail-open. */
+    } else if (!token) {
+      /* No token, no names push -- but the apk table below is independent. */
+      watcher_.arm_retry();
+    } else if (!netlink_.push_token(*token)) {
       watcher_.arm_retry();
       return;
-    }
-    if (!netlink_.push_names(names)) {
+    } else if (!netlink_.push_names(names)) {
       watcher_.arm_retry();
       return;
+    } else {
+      pushed_names_.assign(names.begin(), names.end());
+      names_pushed_ = true;
+      pushed_token_ = token;
+      Log::info("synced {} hidden name(s) ({})", names.size(), why);
     }
-    pushed_names_.assign(names.begin(), names.end());
-    names_pushed_ = true;
-    pushed_token_ = token;
-    Log::info("synced {} hidden name(s) ({})", names.size(), why);
   }
 
   std::set<std::uint32_t> caller_uids;

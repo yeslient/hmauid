@@ -24,13 +24,26 @@
   `scripts/build-host.sh`, with the NDK's property header stubbed under `scripts/hosttest/sys/`):
   the link is exhaustive where a review is not, so a method declared in netlink.hpp but missing from
   netlink.cpp costs a minute here instead of a full kernel matrix, and it can no longer reach the
-  package at all. The first host compile found a real one: `parse_args` read both `--explain`
-  operands as `argv[++i]` in a single expression -- unsequenced, so CALLER and TARGET could come out
-  swapped. They are two statements now.
+  package at all. The first host compile flagged `parse_args` reading both `--explain`
+  operands as `argv[++i]` in a single expression. GCC's -Wsequence-point warning is a
+  false positive there -- a braced-init-list evaluates its elements in order, so
+  CALLER and TARGET could not actually swap -- but the operands are two statements
+  now, which reads the same and silences the warning. Recorded as a warning
+  cleanup, not a defect.
+- docs/design.md carried two claims the code does not make: the netlink family version was listed
+  as 4 (it is 7), and the replacement range was listed as 20001..24096 "checked for absence when
+  the policy is applied" -- the actual range is 20096..20223 / 20224..20479 depending on the uid
+  hash width, and nothing checks it for absence. Both now describe what the code does; a third
+  party implementing from the doc would otherwise have been promised a guarantee that is not there.
 - The package job's version override still said `0.5.0+ci.N` / `5000+N` while the tree is 0.7.0; it
   says `0.7.0+ci.N` / `7000+N` now, matching the fallback in module.prop.
 - Two independent cold reads of the whole tree (kernel+CI, userspace+scripts) came back; everything
   they found that survived verification is fixed here:
+  - sync.cpp: the token-ledger rework of this port put a bare `return` where it meant to skip only
+    the names push -- with an unchanged name set, `sync_now()` exited before publish_code_dirs(), so
+    a newly installed app never reached the kernel's apk table and every isolated process it spawned
+    stayed untagged and fail-open. The names block now skips only itself; the callers and the apk
+    table always run. A failed token read arms the retry and falls through for the same reason.
   - main.c: the netlink error return introduced with this port was not clean after all --
     `tosya_dir_init()` runs earlier and puts the module's private inode_operations on the protected
     parents, so a failed init freed the module under live inodes. Netlink now registers before the
