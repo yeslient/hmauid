@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
 # Compile and link sync-tool for the host, with the two Android-only pieces
-# stubbed: <sys/system_properties.h> from scripts/hosttest/sys, and the
+# stubbed: <sys/system_properties.h> from scripts/hosttest/host/sys, and the
 # property calls it declares defined in scripts/hosttest/android_props_stub.cpp.
+#
+# The include path is scripts/hosttest/host, not scripts/hosttest: the latter
+# also holds a fake linux/ shim tree, and putting it on the include path makes
+# <linux/types.h> resolve to the shim, whose __u32-less types.h breaks every
+# glibc header that includes the real one (sys/stat.h, linux/netlink.h, ...).
 #
 # The link is the point. The NDK build lives behind the DDK images, so a
 # method declared in netlink.hpp but missing from netlink.cpp used to reach
 # CI as a link error only after the eight kernel modules had built; here the
 # linker rejects it in a minute, and an exhaustive check outranks any review.
 #
-# Needs: g++ (C++23), nlohmann-json3-dev, zlib1g-dev.
+# Needs: g++ (C++23), nlohmann-json3-dev, zlib1g-dev. C++23 <print> needs
+# GCC 14 or newer; the default g++ on ubuntu-24.04 is 13 (use CXX=g++-14).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 out="${1:-build/tools-host/sync-tool-host}"
 mkdir -p "$(dirname "$out")"
 
-# C++23 <print> needs GCC 14 or newer; the default g++ on ubuntu-24.04 is 13.
 CXX="${CXX:-g++}"
 "$CXX" -std=c++23 -Wall -Wextra \
-  -I src/tools -I src/include -I scripts/hosttest \
+  -I src/tools -I src/include -I scripts/hosttest/host \
   src/tools/abx.cpp src/tools/text_xml.cpp src/tools/packages_xml.cpp \
   src/tools/main.cpp src/tools/sync.cpp src/tools/watcher.cpp \
   src/tools/netlink.cpp src/tools/status.cpp src/tools/rules.cpp \
