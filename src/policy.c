@@ -732,7 +732,9 @@ void policy_apply(const u32 *pairs, u32 npairs)
 	}
 
 out:
-	kfree(l.masks);
+	/* kvfree: on the paths where the pool never moved into the snapshot it
+	 * is the kvcalloc'ed one, and can be vmalloc memory. */
+	kvfree(l.masks);
 	kfree(l.tgt);
 	kfree(l.cid);
 	kfree(hid);
