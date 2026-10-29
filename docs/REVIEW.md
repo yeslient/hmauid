@@ -17,7 +17,13 @@ carries).
   and three release sites; grepping one instance name is how the third site gets
   missed.
 - Changing behavior greps for every caller of the contract first (who reads what
-  this writes, who depends on the old semantics).
+  this writes, who depends on the old semantics) -- and "caller" includes the
+  non-code dependents: shell scripts, status displays, documentation. A kernel
+  behavior change and a boot script that assumes the old behavior are one bug
+  wearing two files.
+- Review the FILE STATE, not the edit: the checks are "the removed thing is
+  gone" AND "the kept thing exists exactly once" (a duplicated call survived a
+  narrow edit anchor here for a full round).
 
 ## 2. Error returns in init code
 
@@ -30,6 +36,9 @@ carries).
   setup goes before live installation. (src/main.c registers netlink before
   tosya_dir_init() puts private inode_operations on the protected parents,
   exactly for this reason.)
+- A failure after live installation must unwind the installation (and the
+  unwind helper has to be safe in process context), or the setup must move
+  before it.
 
 ## 3. Verification ladder
 
@@ -62,3 +71,22 @@ carries).
   probes, retention bounds, unreachable unload paths) are recorded in
   CHANGELOG.md with the reason. The next round then does not re-litigate them
   or "fix" them into a regression.
+
+## 6. Hygiene rules that each earned their place the hard way
+
+- Include-path hygiene: adding an `-I` directory can shadow system headers. A
+  stub tree containing a fake `linux/types.h` broke every glibc header that
+  includes the real one; stubs live in a subdirectory that exposes only their
+  own layer (scripts/hosttest/host/sys, never scripts/hosttest itself).
+- A gate is code too: the host-build gate failed twice before it passed once
+  (a missing <print> header, then the include shadow). Validate a new gate on
+  the same ladder as the code it gates, and put fast gates before slow ones --
+  the package waits for every gate, so a one-minute link check runs before the
+  eight-kernel matrix, not after it.
+- Environment traps (WSL/Git Bash): multi-line shell goes into an LF file, never
+  inline (wsl.exe mangles continuations and non-ASCII); /tmp does not survive a
+  WSL restart; unauthenticated GitHub API shares a rate-limit pool -- final CI
+  verdicts are confirmed in the browser.
+- The acceptance report's confidence must not exceed the verification actually
+  performed. "Failure paths were walked" means an execution trace happened, not
+  that the intent was re-read.
