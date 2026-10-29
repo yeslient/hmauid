@@ -6,5 +6,7 @@ LOG="$MODDIR/state/sync.log"
 mkdir -p "$MODDIR/state"
 chmod 700 "$MODDIR/state"
 touch "$LOG" && chmod 600 "$LOG"
+# The boot-scoped loaded marker (see load.sh): this stage owns clearing it.
+rm -f "$MODDIR/state/.loaded"
 . "$MODDIR/load.sh"
 tosya_load "$MODDIR" >>"$LOG" 2>&1

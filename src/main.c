@@ -57,7 +57,11 @@ static int __init tosya_init(void)
 	/* The protected parents are resolved before anything can ask for them:
 	 * a names stream that arrived first would have nowhere to land. */
 	tosya_dir_init();
-	netlink_init();
+	/* A family that failed to register leaves the tool with nothing to talk
+	 * to, and only reads as "ready" if the return is dropped here. This is
+	 * still before hooks_install, so an error return is a clean one. */
+	if (netlink_init())
+		return -EIO;
 	/* An inline tier may pin this module and publish a kernel entry below.
 	 * Module-loader failure frees even pinned modules: no error return after
 	 * this point. Individual unsupported tiers report their own status. */

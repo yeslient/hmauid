@@ -312,7 +312,6 @@ void Syncer::sync_now(std::string_view why) {
    * taken modulo the user span), so the guard is built from the pairs before
    * the per-user expansion: one record covers every user. */
   const Pairs base_pairs = pairs;
-  pairs = expand_users(pairs, *users);
 
   /* The rules are per package, so every user answers
    * for its own uids. */

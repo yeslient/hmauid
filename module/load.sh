@@ -1,14 +1,22 @@
 #!/system/bin/sh
 # Shared by the two boot stages. An inline module stays loaded until reboot;
 # never unload or stack a replacement over an existing instance.
+#
+# The loaded check cannot be lsmod: the module takes its own name off the
+# kernel's module list (src/main.c), so /proc/modules never shows it and an
+# lsmod guard would read as "not loaded" every single boot -- post-fs-data
+# would load, service.sh would insmod a second copy on top. A boot-scoped
+# marker does instead: post-fs-data clears it before the first load attempt,
+# and finding it here means this boot has already loaded once.
 tosya_load() {
   local moddir="$1"
   local ko="$moddir/ko/tosya.ko"
+  local marker="$moddir/state/.loaded"
   local loader rc
 
   [ -f "$ko" ] || { echo "[load] no selected kernel module"; return 1; }
-  if lsmod | grep -q '^tosya '; then
-    echo "[load] already loaded; replacing the module requires a reboot"
+  if [ -f "$marker" ]; then
+    echo "[load] already loaded this boot; replacing the module requires a reboot"
     return 0
   fi
 
@@ -28,9 +36,10 @@ tosya_load() {
     return 1
   fi
   echo "[load] $loader rc=$rc $(date '+%m-%d %H:%M:%S')"
-  if ! lsmod | grep -q '^tosya '; then
+  if [ "$rc" -ne 0 ]; then
     echo "[load] module not loaded; see the loader error above"
     return 1
   fi
+  touch "$marker" && chmod 600 "$marker"
   return 0
 }

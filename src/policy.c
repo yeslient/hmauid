@@ -480,8 +480,10 @@ static int layout_targets(struct layout *l, struct apply_pair *p, u32 n,
 	while (hsize < (u32)n * 2u && hsize < (1u << 17))
 		hsize <<= 1;
 	// Slot zero is a complete empty mask, including every caller word.
-	masks = kcalloc(((size_t)n + 1u) * l->nmask_words, sizeof(*masks),
-			GFP_KERNEL);
+	// kvcalloc, not kcalloc: a full pool is tens of megabytes, past what a
+	// physically contiguous allocation can still promise.
+	masks = kvcalloc(((size_t)n + 1u) * l->nmask_words, sizeof(*masks),
+			 GFP_KERNEL);
 	if (g_scratch == NULL)
 		g_scratch = kcalloc(POLICY_MAX_CALLERS / 64 + 1u,
 				    sizeof(*g_scratch), GFP_KERNEL);
@@ -912,7 +914,10 @@ noinline u32 policy_lookup_slow(uid_t target, u32 app)
 		u32 mir = h >> 3, own = policy_index_own(t, p->shift),
 		    m = (u32)0 - p->mirror;
 
-		unit = (mir & m) | (own & ~m);
+		/* The layout side masks its line index (see the placement loop);
+		 * the single-probe query has to mask the same way, or a mirrored
+		 * index past nlines reads past the table and the rule misses. */
+		unit = ((mir & m) | (own & ~m)) & (p->nlines - 1);
 	}
 	sl = &p->tgt[(size_t)unit * POLICY_WAY + sub];
 	if (p->nprobe == 1) {

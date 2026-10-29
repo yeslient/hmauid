@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Five fixes from a second-source review of the tree, all verified against the code before touching
+  anything:
+  - `expand_users()` ran twice on the same pairs (an edit accident of the 0.7.0 port), which is not
+    idempotent -- a second user turned every pair into two, one of them a uid nobody has. Single-user
+    devices were unaffected; the call is back to one.
+  - `load.sh` asked lsmod whether the module is loaded, and 0.7.0 takes the module's own name off the
+    kernel's module list -- the answer was "not loaded" every boot, so service.sh insmod'ed a second
+    copy over the first (its genl family registration fails with -EEXIST and its hooks are refused by
+    the prologue check, but the copy still lingers). The check is now a boot-scoped marker file that
+    post-fs-data clears and load.sh sets after a successful insmod.
+  - `netlink_init()`'s return was dropped in main.c: a family that failed to register still read as
+    "ready". It is a clean error return at that point, and now it is one.
+  - The single-probe policy query indexed the table with a mirrored hash word it never masked, where
+    the layout side masks the same index; on kernels with 8 uid-hash bits and a 16-line table the
+    read went past `p->tgt` and the rule silently missed. The query masks like the layout now.
+  - `policy_apply()` allocated the mask pool with kcalloc: at the documented ceiling that is ~33 MB
+    of physically contiguous memory, which fails -- the documented limits were unreachable together.
+    It is kvcalloc now.
+- The lookup_fast hook's constant-time probe (a non-short-circuiting compare over a fixed number of
+  slots, so hidden and never-installed cost the same) stays as published: short-circuiting it would
+  be the timing oracle the design is arguing against.
+
+## 0.7.0-1: the 0.7.0 port
+
 - The kernel half is 0.7.0 as published, directory guard included: the data directories of a hidden
   package answer as if the package were not installed, behind a `lookup_fast` hook whose masks are
   derived from a 128-bit token. The public 0.7.0 tag carries no userspace half, so `sync-tool` was
@@ -9,16 +33,13 @@
   version 7 streaming one on our side: BEGIN/BATCH/END streams of self-delimited records, the policy
   and the hidden names replaced at END, the apk records applied as they arrive, and a names stream
   that ends with the whole set.
-- `sync-tool` now generates the token once per installation (`state/token`, 0600), pushes it ahead of
+- `sync-tool` now generates the token once per installation (`state/token`, 0400), pushes it ahead of
   every names stream, and derives the hidden-name records from the same pairs the policy carries -- a
   uid can carry several package names, and the guard is per directory. The module.prop description
   reports `hidden N name(s)/M dir guard(s)` and per-stream refusals from the new status layout.
 - The version 5 staging leftovers went with the protocol: `paging.cpp`/`paging.hpp` (the CRC32 the
   kernel checked the staged blob with) and their test are gone, and an empty policy or names set is
   BEGIN and END alone instead of a reserved placeholder pair.
-- `state/` and `state/sync.log` are kept at 0700/0600 from both boot scripts. The log names every
-  caller, target and preset in plain text, and a fresh directory otherwise lands at 0777/0666 --
-  unreadable to apps through /data/adb itself, but open to anything else that already holds root.
 - The package keeps the id it carried before the rename, `hma-uidfake`, so this installs over 0.4.0
   instead of beside it. Only the id and the name in `module.prop` went back; everything the module
   itself carries -- the netlink family, the module parameters, the name the ko files are built under,
@@ -27,6 +48,9 @@
   against.
 - `module.prop`'s fallback version is 0.7.0/7000 instead of 0.1.0/1000. A source tree without a git
   tag used to build a package the manager reads as older than 0.4.0.
+- `state/` and `state/sync.log` are kept at 0700/0600 from both boot scripts. The log names every
+  caller, target and preset in plain text, and a fresh directory otherwise lands at 0777/0666 --
+  unreadable to apps through /data/adb itself, but open to anything else that already holds root.
 
 ## 0.5.0
 
