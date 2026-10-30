@@ -83,6 +83,13 @@
   unwinding its staging (reachable only under memory pressure), and the module-list self-removal
   races /proc walkers for a window every boot -- all upstream design or upstream-bounded; changing
   them without a kernel to test against carries more risk than the disease.
+- Coverage boundary left as designed, device-verified on the target: a WebView renderer is forked by
+  the webview_zygote (uid 1053) and only then setresuid'd into the 90xxx range, while the birth tag
+  fires for zygote births (before == 0) or app-uid transitions -- so sandboxed renderers are never
+  tagged, and the apk such a process opens is the provider's, not its host's. Isolated services
+  forked from the main zygote are covered (they open their own base.apk). Six hours of device
+  runtime confirmed the boundary: two fresh renderers produced no tag signal, exactly as the gate
+  reads.
 
 ## 0.7.0-1: the 0.7.0 port
 

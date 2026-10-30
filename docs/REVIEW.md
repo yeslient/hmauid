@@ -83,6 +83,17 @@ carries).
   inode unlock hook is not in place", "the inode reclaim hook is not in
   place") -- the pair is the criterion, either half alone is not.
 
+## 6b. Acceptance tests target the mechanism's reachable population
+
+- The isolated-process attribution was tested with a WebView renderer, whose
+  birth (webview_zygote forks uid 1053, then setresuid into 90xxx) the
+  tagging gate structurally ignores -- the gate fires for zygote births
+  (before == 0) and app-uid transitions only. The test produced no signal,
+  and "no signal" read like a defect. Trace WHO the mechanism can see (the
+  gate, the birth path, the naming source) before writing WHO to test with,
+  and re-scope the test to the reachable population -- or file the gap as a
+  coverage boundary instead of patching the gate blind.
+
 ## 7. Self-hiding components own their liveness probe
 
 - A component that removes itself from the module list (or any registry) breaks
