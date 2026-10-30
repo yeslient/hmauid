@@ -135,6 +135,16 @@ void report_status(std::string_view text) {
     for (const auto &l : lines)
       out << l << "\n";
   }
+  /* Mode the tmp before it lands: after the rename the 0666 a fresh inode
+   * gets is a world-writable status file, and the window between rename and
+   * a later chmod is exactly the window that matters. */
+  std::error_code pec;
+  std::filesystem::permissions(tmp,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write |
+                                   std::filesystem::perms::group_read |
+                                   std::filesystem::perms::others_read,
+                               pec);
   std::error_code ec;
   std::filesystem::rename(tmp, prop, ec);
   if (ec) {

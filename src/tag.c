@@ -154,7 +154,14 @@ void tosya_tag_note(u32 before_sid, u32 after_sid, u32 old_uid, u32 new_uid)
 	    (new_uid % 100000u) < TOSYA_ISOLATED_START) {
 		const u32 app = (new_uid % 100000u) - TOSYA_APP_MIN;
 
-		if (app < TOSYA_APP_SPAN)
+		/*
+		 * A normal event, one per process the framework hands an app uid
+		 * to: 97 of them in the first two minutes of a boot on the test
+		 * device, which is what made dmesg unreadable. Diagnostics only,
+		 * like the "reached its own code" line below; the isolated lines
+		 * stay unconditional because a run is checked by them.
+		 */
+		if (app < TOSYA_APP_SPAN && TOSYA_DEBUG_ON())
 			pr_info("tosya: app birth uid %u -> app %u\n", new_uid,
 				app);
 	}

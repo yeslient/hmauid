@@ -518,7 +518,9 @@ bool Syncer::publish_code_dirs() {
     auto apk = dir->second;
     if (!std::filesystem::is_regular_file(apk, ec)) {
       const auto base = apk / "base.apk";
-      const auto named = apk / apk.filename().replace_extension("apk");
+      /* Append, not replace_extension: directory names carry dots
+       * (com.xiaomi.macro), and replace_extension would cut the last one. */
+      const auto named = apk / (apk.filename().string() + ".apk");
       if (std::filesystem::is_regular_file(base, ec))
         apk = base;
       else if (std::filesystem::is_regular_file(named, ec))
