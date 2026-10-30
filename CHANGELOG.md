@@ -35,6 +35,16 @@
   the policy is applied" -- the actual range is 20096..20223 / 20224..20479 depending on the uid
   hash width, and nothing checks it for absence. Both now describe what the code does; a third
   party implementing from the doc would otherwise have been promised a guarantee that is not there.
+- Device acceptance on the target (-mi custom kernel) found three things, fixed here:
+  - Boot churn: PackageManager commits packages.xml dozens of times in the first minute, and every
+    commit ran a full re-read + recompute + log write -- 37 passes in 30 seconds. A pass throttle
+    (two seconds since the previous pass, retry timer in between) coalesces the storm; real events
+    are delayed, never lost.
+  - The apk resolver only tried codePath itself and codePath/base.apk -- many system apps name the
+    file after the directory (Settings/Settings.apk), and every one of them was left out of the
+    kernel's apk table, so their isolated processes were never attributed. The resolver now walks
+    codePath, codePath/base.apk and codePath/<dirname>.apk.
+  - module.prop landed world-writable (0666) after the daemon's atomic rename; it is 0644 now.
 - The package job's version override still said `0.5.0+ci.N` / `5000+N` while the tree is 0.7.0; it
   says `0.7.0+ci.N` / `7000+N` now, matching the fallback in module.prop.
 - Two independent cold reads of the whole tree (kernel+CI, userspace+scripts) came back; everything

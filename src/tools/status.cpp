@@ -141,6 +141,15 @@ void report_status(std::string_view text) {
     Log::warn("could not update {}: {}", prop.string(), ec.message());
     return;
   }
+  /* The rename lands the file with whatever mode the umask handed the new
+   * inode (0666 here) -- world-writable, and the description is a status line
+   * root writes for the manager to read. */
+  std::filesystem::permissions(prop,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write |
+                                   std::filesystem::perms::group_read |
+                                   std::filesystem::perms::others_read,
+                               ec);
   last = wanted;
 }
 

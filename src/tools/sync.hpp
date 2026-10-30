@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -110,6 +111,9 @@ private:
   std::optional<std::array<std::uint32_t, 4>> pushed_token_;
   /* The user count the last names push ran with, for the refresh above. */
   std::optional<std::size_t> users_seen_;
+  /* When the last pass started: boot churn commits packages.xml many times a
+   * second, and the pass throttle coalesces them (see sync_now). */
+  std::optional<std::chrono::steady_clock::time_point> last_pass_start_;
   using ApkId = std::pair<std::uint32_t, std::uint64_t>;
   enum class ApkPhase { Confirmed, Adding, Dropping };
   struct PublishedApk {

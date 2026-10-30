@@ -252,6 +252,19 @@ Syncer::open_rules(const std::filesystem::path &file,
 }
 
 void Syncer::sync_now(std::string_view why) {
+  /* Boot churn: PackageManager commits packages.xml dozens of times in the
+   * first minute, and every commit used to trigger a full re-read + recompute
+   * (37 passes in 30 seconds on this device). One pass per quiet period
+   * coalesces the storm; the retry timer picks up whatever the last commit
+   * changed, and real events are never lost -- only delayed. */
+  const auto now_tick = std::chrono::steady_clock::now();
+  if (!config_.once && last_pass_start_ &&
+      now_tick - *last_pass_start_ < std::chrono::seconds(2)) {
+    watcher_.arm_retry();
+    return;
+  }
+  last_pass_start_ = now_tick;
+
   sync_ok_ = false;
   const std::optional<RuleSource> source = RuleSource::active(sources_);
   if (!source) {
@@ -497,11 +510,20 @@ bool Syncer::publish_code_dirs() {
      * are files with an inode, and which partition it is on no longer matters.
      */
     /* packages.xml also carries a direct Foo.apk path for system packages.
-     * Such a path must not become Foo.apk/base.apk. */
+     * Such a path must not become Foo.apk/base.apk. And many system apps name
+     * the file after the directory instead of base.apk
+     * (Settings/Settings.apk) -- the shipped base.apk-only fallback left
+     * every one of them unregistered. */
     std::error_code ec;
-    const auto apk = std::filesystem::is_regular_file(dir->second, ec)
-                         ? dir->second
-                         : dir->second / "base.apk";
+    auto apk = dir->second;
+    if (!std::filesystem::is_regular_file(apk, ec)) {
+      const auto base = apk / "base.apk";
+      const auto named = apk / apk.filename().replace_extension("apk");
+      if (std::filesystem::is_regular_file(base, ec))
+        apk = base;
+      else if (std::filesystem::is_regular_file(named, ec))
+        apk = named;
+    }
     if (!seen.insert(apk.string()).second)
       continue;
     struct stat info{};
