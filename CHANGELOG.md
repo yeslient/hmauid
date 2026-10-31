@@ -35,6 +35,11 @@
   the policy is applied" -- the actual range is 20096..20223 / 20224..20479 depending on the uid
   hash width, and nothing checks it for absence. Both now describe what the code does; a third
   party implementing from the doc would otherwise have been promised a guarantee that is not there.
+- uidbench grew the 5-sigma output its header comment always promised: `(5*sd/delta)^2` paired
+  samples needed, whether the run carries them, and the rerun size if not (`--min-samples N` is the
+  floor). The option itself was documented in the usage text but never parsed -- passing it fell
+  through to usage and exit 2, which is the same "documented ≠ implemented" class as the design.md
+  claims. The host-build gate now syntax-checks uidbench too.
 - Device acceptance on the target (-mi custom kernel) found three things, fixed here:
   - Boot churn: PackageManager commits packages.xml dozens of times in the first minute, and every
     commit ran a full re-read + recompute + log write -- 37 passes in 30 seconds. A pass throttle

@@ -194,7 +194,7 @@ int uidbench_main(int argc, char **argv) {
   double *d_ab = NULL, *d_h2 = NULL, *d_c1 = NULL, *d_ab2 = NULL;
   double *d_hc = NULL;
   unsigned long hidden1 = 0, hidden2 = 0, absent = 19999, dead = 0x7fffff00ul;
-  long rounds = 20000, block = 256;
+  long rounds = 20000, block = 256, min_samples = 0;
   int pin = -1, progress = -1, force = 0, i, n_absent = 0;
   unsigned long absent_list[8];
   const char *csv = NULL;
@@ -232,6 +232,9 @@ int uidbench_main(int argc, char **argv) {
       max_ns = strtod(argv[++i], NULL);
     } else if (!strcmp(argv[i], "--ratio") && i + 1 < argc) {
       ratio_band = strtod(argv[++i], NULL);
+    } else if (!strcmp(argv[i], "--min-samples") && i + 1 < argc) {
+      min_samples = strtol(argv[i + 1], NULL, 0);
+      i++;
     } else if (!strcmp(argv[i], "--force")) {
       force = 1;
     } else if (!strcmp(argv[i], "--progress")) {
@@ -246,7 +249,7 @@ int uidbench_main(int argc, char **argv) {
     fprintf(stderr, "uidbench: need --hidden A,B\n");
     return 2;
   }
-  if (rounds < 100 || block < 1)
+  if (rounds < 100 || block < 1 || min_samples < 0)
     usage(argv[0]);
   if (!n_absent) {
     absent_list[0] = absent;
@@ -439,6 +442,31 @@ int uidbench_main(int argc, char **argv) {
            "                      measured twice; the AB-AB2 uid spread above "
            "is %.3f ns)\n",
            dhc.mean, dhc.sd, 3.0 * dhc.sd, 3.0 * dab2.sd);
+    {
+      /* (5*sd/delta)^2 on the paired series: how many samples one 5 sigma
+       * decision needs. --min-samples is a floor, for runs short enough that
+       * the sd estimate itself is the larger uncertainty. */
+      double delta = fabs(dab.mean);
+      double need =
+          delta > 0.0 ? 25.0 * dab.sd * dab.sd / (delta * delta) : 0.0;
+      size_t want = need > (double)min_samples ? (size_t)ceil(need)
+                                               : (size_t)min_samples;
+
+      if (delta <= 0.0 || need > 1e18) {
+        printf("    samples for 5 sigma : unbounded (signal %.3f ns, sd %.3f "
+               "ns)\n",
+               delta, dab.sd);
+      } else {
+        printf("    samples for 5 sigma : %zu needed, %zu used  (sd %.3f ns, "
+               "delta %.3f ns)  %s\n",
+               want, dab.n, dab.sd, delta,
+               dab.n >= want ? "resolvable" : "NOT resolvable with this run");
+        if (dab.n < want)
+          printf("    note                : rerun with --rounds %zu or more to "
+                 "claim 5 sigma\n",
+                 want + warm);
+      }
+    }
     printf("    hidden vs absent   : %s  (|signal| %.3f vs tolerance "
            "3sd(control)=%.3f, "
            "%.3f ns)\n",
