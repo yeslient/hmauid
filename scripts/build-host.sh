@@ -29,12 +29,12 @@ CXX="${CXX:-g++}"
   src/tools/netlink.cpp src/tools/status.cpp src/tools/rules.cpp \
   src/tools/preset_rules.cpp src/tools/packages.cpp src/tools/paths.cpp \
 scripts/hosttest/android_props_stub.cpp \
-	-o "$out" -ldl -lz
+  -o "$out" -ldl -lz
 
 # uidbench is a standalone tool with its own main: no link, but a syntax gate
 # all the same -- it has shipped a documented option its parser never
 # implemented, which is exactly the class of thing only a compile catches.
 gcc -fsyntax-only -std=c11 -Wall -I src/tools -I src/include \
-	src/tools/uidbench.c
+  src/tools/uidbench.c
 
 echo "host build: $out"

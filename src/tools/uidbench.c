@@ -449,8 +449,8 @@ int uidbench_main(int argc, char **argv) {
       double delta = fabs(dab.mean);
       double need =
           delta > 0.0 ? 25.0 * dab.sd * dab.sd / (delta * delta) : 0.0;
-      size_t want = need > (double)min_samples ? (size_t)ceil(need)
-                                               : (size_t)min_samples;
+      size_t want =
+          need > (double)min_samples ? (size_t)ceil(need) : (size_t)min_samples;
 
       if (delta <= 0.0 || need > 1e18) {
         printf("    samples for 5 sigma : unbounded (signal %.3f ns, sd %.3f "
