@@ -56,7 +56,7 @@ carries).
 5. CI: the eight-kernel matrix, the format gate, the host-build gate, and the
    package, with the package gated on the host build.
 
-## 4. Review freshness
+## 4. Review freshness and artifact verification
 
 - A review is pinned to the commit it read, and findings against commit X are
   re-verified against HEAD before anything is acted on. Some will already be
@@ -64,6 +64,12 @@ carries).
   still caught a third release site that the fix round had missed. Line numbers
   are checked against the current file, never trusted, and never used to decide
   whether a finding is already obsolete.
+- Version numbers and run numbers are for ORDERING only. Whether a commit is
+  inside a given build must be verified on the ARTIFACT -- ko strings, symbols,
+  behavior -- never inferred from the number sequence. (On this fork a
+  `versionCode 7026` was twice misread as "the build before/after commit X"
+  until `strings ko/tosya.ko` settled it: the artifact carried the commit's
+  unique pr_err string.)
 
 ## 5. What is not fixed
 
