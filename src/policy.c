@@ -633,7 +633,8 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	 * armed with no trace that this one never landed.
 	 */
 	for (i = 0; i < npairs && kept < POLICY_MAX_PAIRS; i++) {
-		if (pairs[2 * i + 1] < 10000) // never hide target 0 or system uids
+		if (pairs[2 * i + 1] <
+		    10000) // never hide target 0 or system uids
 			continue;
 		if (pairs[2 * i] == 0) // caller 0: hide from everyone
 			wild = 1;
