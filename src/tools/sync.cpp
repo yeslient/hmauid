@@ -526,6 +526,15 @@ bool Syncer::publish_code_dirs() {
       else if (std::filesystem::is_regular_file(named, ec))
         apk = named;
     }
+    /* The three candidates can all miss (apex and split layouts keep no
+     * standalone apk in codePath) -- and codePath itself is a DIRECTORY,
+     * which stat() would happily accept. The kernel's sweep refuses to arm
+     * directory inodes, so a directory entry here is a guaranteed "could
+     * not arm" per sweep: skip it with the rest. */
+    if (!std::filesystem::is_regular_file(apk, ec)) {
+      ++stat_missed;
+      continue;
+    }
     if (!seen.insert(apk.string()).second)
       continue;
     struct stat info{};
