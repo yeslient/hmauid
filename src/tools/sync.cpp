@@ -139,6 +139,40 @@ constexpr std::size_t kApkLimit = 10000;
   return words;
 }
 
+/* The layouts that name their apk something no stat guess can predict: an
+ * apex module (Foo@1.2.3/Foo.apk), an overlay (Name/NameOverlay.apk), a
+ * preinstalled app shipped under its own file name (MIUIScreenRecorder.apk).
+ * One readdir answers all three, but only when the choice is unambiguous:
+ * exactly one apk, or a base.apk among several. A split-only directory has
+ * several parts and no base; naming the package after one part would put the
+ * wrong inode in the table, so that one stays unregistered as before. */
+[[nodiscard]] std::filesystem::path apk_in(const std::filesystem::path &dir) {
+  std::error_code ec;
+  std::filesystem::directory_iterator it{dir, ec};
+  if (ec)
+    return {};
+  std::filesystem::path first;
+  std::filesystem::path base;
+  std::size_t count = 0;
+  for (const auto &entry : it) {
+    if (entry.path().extension() != ".apk")
+      continue;
+    std::error_code entry_ec;
+    if (!entry.is_regular_file(entry_ec) || entry_ec)
+      continue;
+    ++count;
+    if (count == 1)
+      first = entry.path();
+    if (entry.path().filename() == "base.apk")
+      base = entry.path();
+  }
+  if (!base.empty())
+    return base;
+  if (count == 1)
+    return first;
+  return {};
+}
+
 } // namespace
 
 std::optional<Config> parse_args(int argc, char **argv) {
@@ -525,12 +559,15 @@ bool Syncer::publish_code_dirs() {
         apk = base;
       else if (std::filesystem::is_regular_file(named, ec))
         apk = named;
+      else
+        apk = apk_in(apk);
     }
-    /* The three candidates can all miss (apex and split layouts keep no
-     * standalone apk in codePath) -- and codePath itself is a DIRECTORY,
-     * which stat() would happily accept. The kernel's sweep refuses to arm
-     * directory inodes, so a directory entry here is a guaranteed "could
-     * not arm" per sweep: skip it with the rest. */
+    /* A directory that still resolves to no apk -- split-only code paths,
+     * and directories that vanished between the database read and now. The
+     * path to a DIRECTORY is what stat() would happily accept, and the
+     * kernel's sweep refuses to arm a directory inode, so a directory entry
+     * here is a guaranteed "could not arm" per sweep: skip it with the
+     * rest. */
     if (!std::filesystem::is_regular_file(apk, ec)) {
       ++stat_missed;
       continue;
