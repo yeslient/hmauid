@@ -84,13 +84,20 @@ asm(".pushsection \".text.tosya_inline\",\"ax\"\n" TOSYA_ASM_COPY(
 __attribute__((hot)) noinline struct user_struct *
 tosya_find_user_hook(kuid_t uid)
 {
-	const u32 replacement = policy_query((u32)__kuid_val(uid));
-	const u32 query =
-		(u32)tosya_select(replacement, __kuid_val(uid), replacement);
-	struct user_struct *real = tosya_find_user_orig(KUIDT_INIT(query));
-	struct user_struct *drop =
-		(struct user_struct *)(unsigned long)tosya_select(
-			(unsigned long)real, 0, replacement);
+	u32 replacement, query;
+	struct user_struct *real, *drop;
+
+	/* The fast gate: with no policy armed the original answer IS the
+	 * answer, and the hook costs one static-key check instead of the
+	 * whole query. Armed state falls through to the full path below. */
+	if (!static_branch_unlikely(&tosya_active_key))
+		return tosya_find_user_orig(uid);
+
+	replacement = policy_query((u32)__kuid_val(uid));
+	query = (u32)tosya_select(replacement, __kuid_val(uid), replacement);
+	real = tosya_find_user_orig(KUIDT_INIT(query));
+	drop = (struct user_struct *)(unsigned long)tosya_select(
+		(unsigned long)real, 0, replacement);
 
 	/* A hidden target normally does one native miss in its own hash bucket,
 	 * without incrementing and then dropping the real target's reference.

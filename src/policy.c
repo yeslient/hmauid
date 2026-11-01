@@ -28,6 +28,7 @@
 struct cred;
 #endif
 #include <linux/slab.h>
+#include <linux/sort.h>
 #include <linux/spinlock.h>
 #include <linux/user.h>
 #include <linux/vmalloc.h>
@@ -66,7 +67,11 @@ struct policy {
  */
 static struct uid_pair dummy_tgt[POLICY_MIN_LINES * POLICY_WAY];
 static u64 dummy_mask_pool[POLICY_MIN_LINES * POLICY_WAY];
-static u16 dummy_cid[POLICY_APP_ID_SPAN];
+/* The cid half: the sentinel, so an empty-snapshot lookup exits before the
+ * tables (a zeroed cid would read as ruleful and walk them for nothing). */
+static u16 dummy_cid[POLICY_APP_ID_SPAN] = {
+	[0 ... POLICY_APP_ID_SPAN - 1] = 0xffffu,
+};
 
 // The empty snapshot a query starts on, so the hot path needs no NULL check.
 static struct policy g_empty = {
@@ -85,6 +90,14 @@ static struct policy g_empty = {
  * whole. */
 struct policy *g_pol __rcu = &g_empty;
 
+/*
+ * The find_user hook's fast gate: armed while a policy with rules is live,
+ * disarmed when the snapshot is empty -- the hook then costs one static-key
+ * check and the original answer, instead of the whole query. The setuid and
+ * directory sides keep their own hooks live either way.
+ */
+struct static_key_false tosya_active_key;
+
 struct apply_pair {
 	u32 caller;
 	u32 target;
@@ -94,24 +107,25 @@ static u32 policy_hash(u32 caller, u32 target, u32 shift);
 static u32 policy_index_mode(u32 target, u32 mirror, u32 shift);
 static u32 policy_subslot(u32 target);
 
+static int cmp_apply_pair(const void *a, const void *b)
+{
+	const struct apply_pair *pa = a, *pb = b;
+
+	if (pa->target != pb->target)
+		return pa->target < pb->target ? -1 : 1;
+	if (pa->caller != pb->caller)
+		return pa->caller < pb->caller ? -1 : 1;
+	return 0;
+}
+
+/*
+ * The pairs arrive grouped by caller (the tool's own ordering) and the layout
+ * needs them grouped by target; n tops out at POLICY_MAX_PAIRS, where an
+ * insertion sort would stall the commit path for seconds.
+ */
 static void sort_pairs(struct apply_pair *a, u32 n)
 {
-	u32 i, j;
-
-	for (i = 1; i < n; i++) {
-		struct apply_pair key = a[i];
-
-		for (j = i; j > 0; j--) {
-			struct apply_pair *p = &a[j - 1];
-
-			if (p->target < key.target)
-				break;
-			if (p->target == key.target && p->caller <= key.caller)
-				break;
-			a[j] = *p;
-		}
-		a[j] = key;
-	}
+	sort(a, n, sizeof(*a), cmp_apply_pair, NULL);
 }
 /*
  * Read the uid hash formula out of find_user()'s own code: __uidhashfn
@@ -648,6 +662,8 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	 * The target builder requires at least one target before interning a mask. */
 	if (!kept) {
 		policy_publish(&g_empty);
+		/* The find_user hook's gate disarms with the empty snapshot. */
+		static_branch_disable(&tosya_active_key);
 		pr_info("tosya: cleared policy\n");
 		kfree(np);
 		return 0;
@@ -726,8 +742,12 @@ int policy_apply(const u32 *pairs, u32 npairs)
 
 	/* Publish first, so the self-check answers through the snapshot a caller
    * would see. */
-	if (ok)
+	if (ok) {
 		policy_publish(np);
+		/* The find_user hook's gate arms with the first non-empty
+		 * snapshot and stays armed while rules are live. */
+		static_branch_enable(&tosya_active_key);
+	}
 
 	if (ok) {
 		u32 checked = 0, hits = 0;
