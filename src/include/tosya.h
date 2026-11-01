@@ -113,7 +113,13 @@ struct uid_pair { // 8 bytes: POLICY_WAY of them fill one cache line
 	u16 mask_id;
 };
 
-void policy_apply(const u32 *pairs, u32 npairs);
+/*
+ * 0 when the new policy is live; a negative errno when it was refused and the
+ * previous policy stays armed. The netlink END ack carries that value back, so a
+ * refusal reaches the tool (and its status line) instead of looking like a
+ * successful apply that changed nothing.
+ */
+int policy_apply(const u32 *pairs, u32 npairs);
 
 /*
  * Diagnostics sit behind a static key: when it is off the branch is patched to

@@ -611,45 +611,65 @@ static void policy_publish(struct policy *np)
 	policy_release(old);
 }
 
-void policy_apply(const u32 *pairs, u32 npairs)
+int policy_apply(const u32 *pairs, u32 npairs)
 {
 	struct policy *np;
 	struct layout l = {};
-	struct apply_pair *tmp;
-	u32 *hid;
-	u32 i, n = 0, wild = 0;
-	int nh, ok = 0;
+	struct apply_pair *tmp = NULL;
+	u32 *hid = NULL;
+	u32 i, n = 0, kept = 0, wild = 0;
+	int nh, ok = 0, rc = 0;
 
 	np = kzalloc(sizeof(*np), GFP_KERNEL);
 	if (!np)
-		return;
+		return -ENOMEM;
 
-	tmp = kcalloc(POLICY_MAX_PAIRS, sizeof(*tmp), GFP_KERNEL);
-	hid = kcalloc(POLICY_MAX_CALLERS, sizeof(*hid), GFP_KERNEL);
-	if (!tmp || !hid)
-		goto out;
-
-	for (i = 0; i < npairs && n < POLICY_MAX_PAIRS; i++) {
-		u32 target = pairs[2 * i + 1];
-
-		if (target < 10000) // never hide target 0 or system uids
+	/*
+	 * Count the pairs that survive the filter before allocating the scratch
+	 * array, and size it by that count. The old fixed request was
+	 * POLICY_MAX_PAIRS * sizeof(struct apply_pair) = 512 KiB, an order-7
+	 * allocation whatever the size of the policy actually sent; on a
+	 * fragmented boot that request fails, and the previous policy used to stay
+	 * armed with no trace that this one never landed.
+	 */
+	for (i = 0; i < npairs && kept < POLICY_MAX_PAIRS; i++) {
+		if (pairs[2 * i + 1] < 10000) // never hide target 0 or system uids
 			continue;
 		if (pairs[2 * i] == 0) // caller 0: hide from everyone
 			wild = 1;
-		tmp[n].caller = pairs[2 * i];
-		tmp[n].target = target;
-		n++;
+		kept++;
 	}
 	if (i < npairs)
 		pr_warn("tosya: policy of %u pair(s) truncated to the %u the table holds\n",
-			npairs, n);
+			npairs, kept);
 
 	/* No target remains after filtering: publish the existing empty snapshot.
 	 * The target builder requires at least one target before interning a mask. */
-	if (!n) {
+	if (!kept) {
 		policy_publish(&g_empty);
 		pr_info("tosya: cleared policy\n");
+		kfree(np);
+		return 0;
+	}
+
+	tmp = kcalloc(kept, sizeof(*tmp), GFP_KERNEL);
+	hid = kcalloc(POLICY_MAX_CALLERS, sizeof(*hid), GFP_KERNEL);
+	if (!tmp || !hid) {
+		pr_err("tosya: cannot allocate policy scratch for %u pair(s); keeping previous policy\n",
+		       kept);
+		rc = -ENOMEM;
 		goto out;
+	}
+
+	/* Same filter as the count, so tmp[] holds exactly kept pairs. */
+	for (i = 0; i < npairs && n < kept; i++) {
+		u32 target = pairs[2 * i + 1];
+
+		if (target < 10000)
+			continue;
+		tmp[n].caller = pairs[2 * i];
+		tmp[n].target = target;
+		n++;
 	}
 
 	if (n) {
@@ -667,19 +687,23 @@ void policy_apply(const u32 *pairs, u32 npairs)
 	sort_pairs(tmp, n);
 
 	nh = build_hiders(tmp, n, hid);
-	if (nh < 0)
+	if (nh < 0) {
 		pr_err("tosya: more than %u callers; keeping previous policy\n",
 		       POLICY_MAX_CALLERS);
-	else if (layout_cids(&l, hid, (u32)nh))
+		rc = -ENOSPC;
+	} else if (layout_cids(&l, hid, (u32)nh)) {
 		pr_err("tosya: cannot lay out %d caller(s); keeping previous policy\n",
 		       nh);
-	else {
+		rc = -ENOMEM;
+	} else {
 		l.nmask_words = nh ? ((u32)nh + 63) / 64 : 1;
-		if (layout_targets(&l, tmp, n, hid, (u32)nh))
+		if (layout_targets(&l, tmp, n, hid, (u32)nh)) {
 			pr_err("tosya: cannot lay out %u pair(s); keeping previous policy\n",
 			       n);
-		else
+			rc = -ENOMEM;
+		} else {
 			ok = 1;
+		}
 	}
 
 	if (ok) {
@@ -741,15 +765,18 @@ out:
 	kfree(tmp);
 
 	/* A layout that failed never filled np in, and the caller has already said why: only a
-	 * policy that is live has fields worth printing. */
+	 * policy that is live has fields worth printing. The errno travels back to
+	 * the netlink caller so a refusal is visible instead of looking like an
+	 * apply that did nothing. */
 	if (!ok) {
 		kfree(np);
-		return;
+		return rc;
 	}
 
 	pr_info("tosya: injected %u pair(s), %u caller(s), %u line(s), %u mask word(s) in %u mask(s), probe %u, %s layout\n",
 		npairs, np->ncallers, np->nlines, np->nmask_words, l.nmasks,
 		np->nprobe, np->mirror ? "uid-hash" : "own-hash");
+	return 0;
 }
 
 /*

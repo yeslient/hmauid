@@ -322,7 +322,14 @@ static int kaux_end(struct sk_buff *skb, struct genl_info *info)
 	mutex_unlock(&g_stream_lock);
 
 	if (kind == KAUX_KIND_POLICY) {
-		policy_apply(g_policy, words / 2u);
+		/*
+		 * A refused apply leaves the previous policy armed. The ack carries
+		 * the errno back, and the status line keeps it, so the tool reads a
+		 * refusal instead of an apply that silently changed nothing.
+		 * tosya_status_note(0) clears a previous one.
+		 */
+		rc = policy_apply(g_policy, words / 2u);
+		tosya_status_note(rc);
 	} else if (kind == KAUX_KIND_APKS) {
 		u32 left = tosya_apk_stream_finish();
 		pr_info("tosya: apk stream: %u record(s), %u in the table, %u refused\n",
