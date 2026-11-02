@@ -42,9 +42,55 @@ post-fs-data did not, starts sync-tool).
 
 ## 2. Run
 
-Filled in from the multi-user audit and the poll-cost quantification; the
-kernel chains (policy apply, the directory and inline hooks, the netlink
-dispatch) are documented in `docs/design.md` and are not repeated here.
+The kernel chains (policy apply, the directory and inline hooks, the netlink
+dispatch) are documented in `docs/design.md` and are not repeated here. This
+section records what the lifecycle audit measured on the device or read out of
+the tool.
+
+### Daemon idle cost (measured on 0.7.0+ci.32, screen-on steady state)
+
+- 60 s `utime+stime` delta of the sync-tool process: 1 tick (CLK_TCK=100) =
+  10 ms = **0.017% of one core**; voluntary context switches ~2/s (the 1 s
+  poll tick plus inotify wakes).
+- Process lifetime at 6.2 h uptime: 176 ticks = 1.76 s = 0.0079% of one core,
+  **including every screen-off period in that window** -- the watcher's
+  timerfds are CLOCK_MONOTONIC (`src/tools/watcher.cpp: Watcher::open()`),
+  which does not advance in suspend, so the lifetime figure is an upper bound
+  across all power states.
+- Decision, recorded so it is not re-litigated: raising the post-unlock poll
+  timeout from 1 s to 10 s was proposed as a power win; the measured saving
+  (~0.16 s of CPU per 6 h) is below the 1-tick noise floor, and the change
+  would buy a four-state timeout function, a wider CE-close detection window
+  and a hosttest state machine against it. **Quantified as not worth it.**
+  Re-open threshold: a 60 s delta of 6 ticks or more (0.1% of one core).
+
+### Multi-user scope (audited in the tree, verified on the device)
+
+The chain is user-aware end to end; the only user-0 artifact is the HMA config
+itself, which is where the HMA app keeps it:
+
+- `src/tools/packages.cpp: android_users()` enumerates `/data/system/users` --
+  every user on the device, not just user 0.
+- `src/tools/packages.cpp: expand_users()` multiplies every base pair into
+  every enumerated user's uid range, with explicit u64 overflow guards.
+- `src/tools/sync.cpp` re-resolves the user set when `/data/system/users`
+  changes (the watcher watches that directory) and refreshes the kernel's name
+  records when the user count changes.
+- The kernel matches callers by app id (`src/policy.c: build_hiders()`), so a
+  rule's caller and target apply in every user at once.
+- **Device verification** (0.7.0+ci.32, users {0, 999:XSpace}): the config
+  expands to 3127 base pairs and the kernel reports `injected 6254 pair(s),
+  76 caller(s)` -- exactly 2x, the two enumerated users; `--list` answers
+  identically for the user-0 and the user-999 uid of the same package, because
+  the caller identity folds to the app id.
+
+Scope notes: target uids are multiplied into every enumerated user whether or
+not the package is installed there -- hiding is by uid, deterministic, and a
+uid range with no processes behind it costs nothing. A package installed only
+in a secondary user is covered as long as it is in the shared
+`/data/system/packages.xml`; per-user install state does not gate pair
+generation. The config is read from user 0 only
+(`src/tools/paths.cpp: RuleSource::known()`).
 
 ## 3. Remove
 
@@ -97,7 +143,5 @@ must be re-adjudicated.
 
 ### To be recorded in later passes
 
-- Poll-cost quantification and the multi-user scope audit (measured on
-  0.7.0+ci.32; entries land with the audit).
 - The webview_zygote call-site invariants (WZ-1..3, with the tagging-gate
   boundary that acceptance item 4 turned into a lesson).
