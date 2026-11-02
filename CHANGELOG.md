@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- The module gained the two lifecycle pieces it was missing, both around the daemon rather than
+  the kernel: `module/uninstall.sh` now runs when a module manager removes the package -- it kills
+  the sync-tool that service.sh started with `&` (exact /proc cmdline match, not `pkill -f`, whose
+  substring ERE would also hit anything merely mentioning the path), reports the orphan count, and
+  clears `state/.loaded` and `state/token`; the kernel side needs no line there because the module
+  takes itself off the kernel's module list, so the ko leaves with the reboot a removal asks for.
+  service.sh now kills a leftover daemon the same way before starting a fresh one (an update that
+  did not reboot, or a service.sh that ran twice) and rotates `sync.log` at that same spot --
+  between the kill and the start, because the daemon holds the log fd and an `mv` while it lives
+  leaves it writing into the renamed inode with the fresh log empty until reboot. Measured idle
+  growth is ~120 KiB/h, so the 4 MiB threshold sits ~8 days out and the check runs at boot only.
+  The package job now asserts `uninstall.sh` is inside the built zip and syntax-checks every
+  shipped shell script out of the zip itself.
+
 - Five fixes from a second-source review of the tree, all verified against the code before touching
   anything:
   - `expand_users()` ran twice on the same pairs (an edit accident of the 0.7.0 port), which is not

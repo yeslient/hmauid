@@ -332,6 +332,21 @@ jobs:
             -DUG_VERSION_CODE_OVERRIDE="$((7000 + ${{ github.run_number }}))"
           cmake --build build -j"$(nproc)"
           ls -la build/dist
+      - name: Check the packaged module scripts
+        # The zip is the contract: a packaging rule that silently drops a
+        # top-level module file would ship a module whose uninstall leaves the
+        # daemon running. Assert against the zip itself, and syntax-check every
+        # shipped shell script, not the working-tree copies.
+        run: |
+          set -euo pipefail
+          zip=$(ls build/dist/*.zip | head -1)
+          unzip -l "$zip" | grep -q 'uninstall.sh' || {
+            echo "uninstall.sh missing from the module zip"; exit 1; }
+          for f in customize.sh service.sh uninstall.sh load.sh post-fs-data.sh; do
+            unzip -l "$zip" | grep -q "$f" || {
+              echo "$f missing from the module zip"; exit 1; }
+            unzip -p "$zip" "$f" | sh -n
+          done
       - name: Upload the module
         uses: actions/upload-artifact@v4
         with:
