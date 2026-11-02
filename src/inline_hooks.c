@@ -601,8 +601,11 @@ noinline struct dentry *tosya_lookup_fast_hook(void *nd)
 {
 	struct qstr *last = (struct qstr *)((u8 *)nd + g_nd_last_off);
 	struct qstr asked = *last;
-	const u8 *mask_bytes;
-	u32 mask_hash;
+	/* Both operands of the csel below are read unconditionally, so the out
+	 * params start as the original name and hash: on a miss the selects
+	 * keep them, and no indeterminate value is ever read. */
+	const u8 *mask_bytes = last->name;
+	u32 mask_hash = last->hash;
 	bool hit;
 
 	hit = tosya_dir_walk_last(&asked, &mask_bytes, &mask_hash);
