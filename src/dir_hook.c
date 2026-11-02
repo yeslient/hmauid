@@ -469,7 +469,7 @@ bool tosya_dir_walk_last(const struct qstr *last, const u8 **mask_bytes,
 {
 	const struct dir_names *s;
 	const struct dir_ent *e;
-	u32 app, idx, at, keep, hit;
+	u32 app, idx, hit;
 	u64 name_hash;
 
 	rcu_read_lock();
@@ -477,16 +477,23 @@ bool tosya_dir_walk_last(const struct qstr *last, const u8 **mask_bytes,
 	if (s == NULL)
 		s = &g_dir_empty_names;
 	app = dir_caller_app();
-	name_hash = dir_hash(last->name, last->len);
-	idx = dir_hidden_probe(s, app, last->name, last->len, name_hash);
-	/* An untagged caller may see every name, wildcard records included. */
-	keep = 0u - (u32)(app != POLICY_ID_NONE);
-	idx = (idx & keep) | (DIR_HIT_NONE & ~keep);
-	at = idx & (0u - (u32)(idx != DIR_HIT_NONE));
-	e = &s->ent[at];
+	/* An untagged caller (root, kernel threads, anything the framework has
+	 * not handed an app uid) may see every name, wildcard records
+	 * included: the hash and the fixed probe are theirs to skip, and
+	 * their per-component cost is this check alone. */
+	if (app != POLICY_ID_NONE) {
+		name_hash = dir_hash(last->name, last->len);
+		idx = dir_hidden_probe(s, app, last->name, last->len,
+				       name_hash);
+	} else {
+		idx = DIR_HIT_NONE;
+	}
+	e = &s->ent[idx & (0u - (u32)(idx != DIR_HIT_NONE))];
 	hit = (idx != DIR_HIT_NONE);
-	*mask_bytes = s->arena + e->mask_off;
-	*mask_hash = e->mask_hash;
+	if (hit) {
+		*mask_bytes = s->arena + e->mask_off;
+		*mask_hash = e->mask_hash;
+	}
 	rcu_read_unlock();
 #ifdef TOSYA_DIR_TEST
 	g_dir_test_walk_hits += hit;
