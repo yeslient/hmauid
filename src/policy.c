@@ -625,6 +625,16 @@ static void policy_publish(struct policy *np)
 	policy_release(old);
 }
 
+/*
+ * The filter both passes of policy_apply share: the count pass sizes the
+ * scratch by it and the fill pass populates by it -- a divergence here would
+ * make the allocation and the contents disagree.
+ */
+static bool policy_pair_kept(u32 caller, u32 target)
+{
+	return target >= 10000; // never hide target 0 or system uids
+}
+
 int policy_apply(const u32 *pairs, u32 npairs)
 {
 	struct policy *np;
@@ -645,10 +655,13 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	 * allocation whatever the size of the policy actually sent; on a
 	 * fragmented boot that request fails, and the previous policy used to stay
 	 * armed with no trace that this one never landed.
+	 *
+	 * The filter itself is a shared helper: the count pass sizes the scratch
+	 * by it and the fill pass populates by it -- a divergence here would make
+	 * the allocation and the contents disagree.
 	 */
 	for (i = 0; i < npairs && kept < POLICY_MAX_PAIRS; i++) {
-		if (pairs[2 * i + 1] <
-		    10000) // never hide target 0 or system uids
+		if (!policy_pair_kept(pairs[2 * i], pairs[2 * i + 1]))
 			continue;
 		if (pairs[2 * i] == 0) // caller 0: hide from everyone
 			wild = 1;
@@ -682,7 +695,7 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	for (i = 0; i < npairs && n < kept; i++) {
 		u32 target = pairs[2 * i + 1];
 
-		if (target < 10000)
+		if (!policy_pair_kept(pairs[2 * i], target))
 			continue;
 		tmp[n].caller = pairs[2 * i];
 		tmp[n].target = target;
@@ -1095,6 +1108,9 @@ int policy_init(void)
 void policy_free(void)
 {
 	policy_publish(&g_empty);
+	/* The gate disarms with the empty snapshot, matching every other path
+	 * that publishes one. */
+	static_branch_disable(&tosya_active_key);
 	kfree(g_mhash);
 	kfree(g_scratch);
 	kfree(g_used);

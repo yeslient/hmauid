@@ -97,6 +97,7 @@ struct dir_ent {
  */
 struct dir_names {
 	u32 nent; // distinct names
+	u32 has_wild; // the staged set carried a caller-0 record
 	u32 pair_bits; // pair table: 1 << pair_bits slots
 	u32 mask_bits; // cold-path mask table: 1 << mask_bits slots
 	u32 arena_bytes;
@@ -429,7 +430,11 @@ static __attribute__((__noinline__)) u32 dir_hidden_probe(
 		hit = same ? at : hit;
 		own = (own + 1u) & slot_mask;
 	}
-	for (i = 0; i < DIR_PAIR_PROBES; i++) {
+	/* The wildcard round only runs when the published set carries one: with
+	 * no caller-0 record every one of these probes is a guaranteed miss,
+	 * and the set is immutable per publication, so the shorter run is not a
+	 * per-name timing oracle. */
+	for (i = 0; i < DIR_PAIR_PROBES * (t->has_wild != 0u); i++) {
 		const u32 pair = t->pair[wild];
 		const u32 live = 0u - (u32)(pair != 0u);
 		const u32 at = (DIR_PAIR_ENT(pair) - 1u) & live;
@@ -713,7 +718,7 @@ static bool dir_names_fill(struct dir_names *s)
 	const u32 names_bytes = g_dir_stage_names_n;
 	u32 bits = 4;
 	u32 *seen;
-	u32 i, nent = 0, mask_bytes = 0;
+	u32 i, nent = 0, mask_bytes = 0, has_wild = 0;
 	u32 key[4];
 
 	while ((1u << bits) < (n != 0 ? n * 2u : 1u) && bits < 20)
@@ -770,6 +775,10 @@ static bool dir_names_fill(struct dir_names *s)
 			seen[pos] = e;
 		}
 		pos = dir_pair_hash(st->app, st->hash, st->len) & pair_mask;
+		/* A caller-0 record is the wildcard chain's only resident candidate:
+		 * the probe skips its whole round when the set carries none. */
+		if (st->app == TOSYA_APP_SPAN)
+			has_wild = 1;
 		for (probe = 0; probe < DIR_PAIR_PROBES; probe++) {
 			const u32 cur = s->pair[pos];
 			const u32 pair = DIR_PAIR_MAKE(st->app, e);
@@ -789,6 +798,7 @@ static bool dir_names_fill(struct dir_names *s)
 	}
 	kvfree(seen);
 	s->nent = nent;
+	s->has_wild = has_wild;
 	s->arena_bytes = names_bytes + mask_bytes;
 	return true;
 }

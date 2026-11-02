@@ -11,7 +11,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 out=build/policy_host_test
-cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest -I src/include -o "$out" scripts/policy_host_test.c
+cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$out" scripts/policy_host_test.c
 "$out"
 
 # The inline hook's runtime half: a real kernel function (find_user, taken from a
@@ -26,7 +26,7 @@ clang -std=c23 -O1 -Wall -Wextra -Wno-unused-function -D_GNU_SOURCE -pthread -I 
 # forcing and what a revert takes back are checked without a kernel.
 tiers=build/tiers_test
 clang -std=c23 -O1 -Wall -Wextra -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I src/include \
-  -I scripts/hosttest -o "$tiers" scripts/tiers_test.c
+  -I scripts/hosttest/hosttest -o "$tiers" scripts/tiers_test.c
 "$tiers"
 
 # The directory guard: six protected parent inodes, one visible child, and a caller
@@ -51,7 +51,7 @@ python3 scripts/extract_shadow.py
 shadow=build/shadow_test
 clang -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -std=c23 -O1 -g \
   -Wall -Wextra -Wno-unused-parameter -Wno-unused-but-set-variable \
-  -DTOSYA_SHADOW_TEST -Werror=invalid-pp-token -I build -I src/include -I scripts/hosttest -o "$shadow" \
+  -DTOSYA_SHADOW_TEST -Werror=invalid-pp-token -I build -I src/include -I scripts/hosttest/hosttest -o "$shadow" \
   scripts/shadow_host_test.c
 # A timeout is part of the harness: a lock taken twice used to hang here instead of failing, and a
 # hang is the one result nobody reads.
@@ -65,7 +65,7 @@ done
 tsan=build/shadow_tsan
 clang -fsanitize=thread -fno-omit-frame-pointer -pthread -std=c23 -O1 -g \
   -Wall -Wextra -Wno-unused-parameter -Wno-unused-but-set-variable \
--DTOSYA_SHADOW_TEST   -Werror=invalid-pp-token -I build -I src/include -I scripts/hosttest -o "$tsan" \
+-DTOSYA_SHADOW_TEST   -Werror=invalid-pp-token -I build -I src/include -I scripts/hosttest/hosttest -o "$tsan" \
   scripts/shadow_host_test.c
 TSAN_OPTIONS="suppressions=$PWD/scripts/tsan.supp" timeout 600 "$tsan" contend
 
@@ -75,7 +75,7 @@ TSAN_OPTIONS="suppressions=$PWD/scripts/tsan.supp" timeout 600 "$tsan" contend
 # three has a second thread to share anything with.
 asan=build/policy_host_test_asan
 cc -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g -D_GNU_SOURCE -pthread \
-  -DTOSYA_HOST_TEST -I src -I scripts/hosttest -I src/include -o "$asan" \
+  -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$asan" \
   scripts/policy_host_test.c
 "$asan"
 
@@ -88,7 +88,7 @@ clang -fsanitize=address,undefined -fno-omit-frame-pointer -std=c23 -O1 -g \
 asan=build/tiers_test_asan
 clang -fsanitize=address,undefined -fno-omit-frame-pointer -std=c23 -O1 -g \
   -Wall -Wextra -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I src/include \
-  -I scripts/hosttest -o "$asan" scripts/tiers_test.c
+  -I scripts/hosttest/hosttest -o "$asan" scripts/tiers_test.c
 "$asan"
 
 plain=build/dir_test_plain
