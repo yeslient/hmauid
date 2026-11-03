@@ -30,7 +30,9 @@ CI/PC (needs a JDK 17+, curl, unzip; tools are fetched into `.scratch/`):
 
     bash build-host.sh
 
-Produces `isotest.apk`, signed with a generated debug key.
+Produces `isotest.apk`, signed with a generated debug key. On Windows the
+fetched aapt2 is a Linux binary: point `AAPT2` at a Windows aapt2.exe and the
+fetched jars serve the rest -- `AAPT2=/path/to/aapt2.exe bash build-host.sh`.
 
 ## Run
 

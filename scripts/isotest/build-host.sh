@@ -14,6 +14,10 @@ cd "$(dirname "$0")"
 TOOLS=${TOSYA_ISOTEST_TOOLS:-.scratch/isotest-tools}
 BT="$TOOLS/bt34/android-14"
 AJ="$TOOLS/android-14/android.jar"
+# The fetched aapt2 is a Linux binary. Building on Windows: point AAPT2 at a
+# Windows aapt2.exe (the fetched d8.jar/apksigner.jar/android.jar are
+# platform-independent and serve either way).
+AAPT2=${AAPT2:-$BT/aapt2}
 
 if [ ! -f "$BT/aapt2" ] || [ ! -f "$AJ" ]; then
   echo "== fetching the pinned build tools =="
@@ -25,10 +29,13 @@ if [ ! -f "$BT/aapt2" ] || [ ! -f "$AJ" ]; then
   unzip -q -o "$TOOLS/bt34.zip" -d "$TOOLS/bt34-unzip"
   unzip -q -o "$TOOLS/p34.zip" -d "$TOOLS/p34-unzip"
   # build-tools_r34-linux.zip unpacks one android-14/ directory; the platform
-  # zip unpacks android-14/ alongside its other contents.
+  # zip unpacks android-14/ alongside its other contents. The destination
+  # parents have to exist for the moves, and the packed zip files are dropped
+  # once unpacked.
+  mkdir -p "$TOOLS/bt34" "$TOOLS/android-14"
   mv "$TOOLS/bt34-unzip/android-14" "$TOOLS/bt34/android-14"
-  mkdir -p "$TOOLS/android-14"
   find "$TOOLS/p34-unzip" -name android.jar -exec mv {} "$TOOLS/android-14/" \;
+  rm -f "$TOOLS/bt34.zip" "$TOOLS/p34.zip"
 fi
 
 KS="$TOOLS/debug.keystore"
@@ -39,7 +46,7 @@ KS="$TOOLS/debug.keystore"
 rm -rf out && mkdir -p out
 
 echo "== 1. aapt2 link (manifest only) =="
-"$BT/aapt2" link -o out/unsigned.apk -I "$AJ" \
+"$AAPT2" link -o out/unsigned.apk -I "$AJ" \
   --manifest AndroidManifest.xml \
   --min-sdk-version 26 --target-sdk-version 34
 

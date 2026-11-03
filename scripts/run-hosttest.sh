@@ -11,7 +11,9 @@ set -eu
 cd "$(dirname "$0")/.."
 
 # The promises a refactor could silently delete, before anything else runs.
-scripts/check-invariants.sh
+# bash-prefixed on purpose: a checkout on a filesystem that drops the exec
+# bit still runs it.
+bash scripts/check-invariants.sh
 # The lifecycle doc's anchors: a rename must fail here, not point at ghosts.
 python3 scripts/check_lifecycle_anchors.py
 
