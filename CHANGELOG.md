@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- docs/LIFECYCLE.md is complete: three phases, each with the criterion that
+  finds its failure, a measured run-phase section (idle cost, multi-user
+  scope), and a boundaries table where every entry carries a proof, a cost or
+  an invalidation condition -- the B5 fail-closed proof, the WZ
+  webview_zygote invariants, the g_hash guess window with its concrete cost,
+  the apk array's bounded-lazy recycling, the rotation placement rule, and
+  the deferred items with the measurement that would reopen each. Anchors are
+  `file: symbol()` and `scripts/check_lifecycle_anchors.py` enforces them --
+  a line drift is fine, a rename fails the suite. Two deferred decisions are
+  recorded with their quantification contracts so they are not re-litigated
+  blind: the dir-side empty-state static gate waits for statloop numbers
+  (stat/s, worst-path p99, armed-vs-disarmed delta), and the
+  KAUX_STAGED_BYTES shrink waits for the measured staging peak.
+
+- The webview_zygote boundary that acceptance item 4 turned into a lesson is
+  now written where it can be enforced, not only where it can be read. Three
+  invariants cover the four physical call sites (the LSM hook has two
+  kernel-version variants): the gate ignores a helper zygote's 1053 -> 90xxx
+  move by design, because an isolated child is named by the apk it opens and
+  not by a birth tag, and a WebView renderer as an attribution test subject
+  produces no signal by construction. scripts/check-invariants.sh greps the
+  markers in CI's host-build job and at the top of the host suite; a debug
+  build warns inside tosya_tag_note() if a transition the gate should have
+  excluded reaches it -- a static-key check, a NOP in release.
+
+- The tooling came in from the cold at the same time: the isotest app
+  (manifest, service, Termux and pinned-URL host builds, README with
+  provenance) and statloop.c are checked in, and CI grew two jobs -- the full
+  host suite, which until now only ran where someone remembered to run it,
+  and an isotest apk build with apksigner verify.
+
 - `policy_apply()`'s two passes over the raw pairs are one named stage now (`collect_pairs()`):
   the count pass (tmp == NULL) sizes the scratch, the fill pass writes it -- same filter, same
   cap, same walk. The split is behavior-preserving and was proven so rather than asserted: the

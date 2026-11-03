@@ -16,34 +16,39 @@
 #include <time.h>
 #include <sys/stat.h>
 
-static double ns_per_call(const char *dir, const char *prefix, long n) {
-  struct timespec t0, t1;
-  char path[512];
-  struct stat sb;
+static double ns_per_call(const char *dir, const char *prefix, long n)
+{
+	struct timespec t0, t1;
+	char path[512];
+	struct stat sb;
 
-  for (long i = 0; i < 1000; i++) { /* warm the dcache and the allocator */
-    snprintf(path, sizeof path, "%s/%s_warm%ld", dir, prefix, i);
-    stat(path, &sb);
-  }
-  clock_gettime(CLOCK_MONOTONIC, &t0);
-  for (long i = 0; i < n; i++) {
-    snprintf(path, sizeof path, "%s/%s_%ld", dir, prefix, i);
-    stat(path, &sb); /* a fresh name: ->lookup runs, a negative entry lands */
-  }
-  clock_gettime(CLOCK_MONOTONIC, &t1);
-  return ((t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec)) / (double)n;
+	for (long i = 0; i < 1000;
+	     i++) { /* warm the dcache and the allocator */
+		snprintf(path, sizeof path, "%s/%s_warm%ld", dir, prefix, i);
+		stat(path, &sb);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	for (long i = 0; i < n; i++) {
+		snprintf(path, sizeof path, "%s/%s_%ld", dir, prefix, i);
+		stat(path,
+		     &sb); /* a fresh name: ->lookup runs, a negative entry lands */
+	}
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	return ((t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec)) /
+	       (double)n;
 }
 
-int main(int argc, char **argv) {
-  const char *dir = argc > 1 ? argv[1] : "/data/data";
-  long n = argc > 2 ? atol(argv[2]) : 100000;
-  const char *prefix = argc > 3 ? argv[3] : "probe";
+int main(int argc, char **argv)
+{
+	const char *dir = argc > 1 ? argv[1] : "/data/data";
+	long n = argc > 2 ? atol(argv[2]) : 100000;
+	const char *prefix = argc > 3 ? argv[3] : "probe";
 
-  if (n < 1000)
-    return 1;
-  /* three rounds: the spread between them is the noise floor */
-  for (int round = 1; round <= 3; round++)
-    printf("round %d: %8.1f ns/lookup (%s, n=%ld)\n", round,
-           ns_per_call(dir, prefix, n), dir, n);
-  return 0;
+	if (n < 1000)
+		return 1;
+	/* three rounds: the spread between them is the noise floor */
+	for (int round = 1; round <= 3; round++)
+		printf("round %d: %8.1f ns/lookup (%s, n=%ld)\n", round,
+		       ns_per_call(dir, prefix, n), dir, n);
+	return 0;
 }

@@ -10,23 +10,24 @@ letting the doc rot.
 
 ## 1. Install
 
-What happens: the module manager unpacks the zip and runs `module/ customize.sh`;
+What happens: the module manager unpacks the zip and runs `module/customize.sh`;
 the first boot runs `post-fs-data.sh` (clears the boot-scoped loaded marker,
 loads), then `service.sh` (kills any leftover daemon, rotates the log, loads if
 post-fs-data did not, starts sync-tool).
 
-- `module/ customize.sh: kmi_from_uname()` reads the branch and the version out
+- `module/customize.sh: kmi_from_uname()` reads the branch and the version out
   of `uname -r` separately -- the "11" in `android14-11` is a KMI generation,
   not a kernel version -- and copies `ko/<kmi>_arm64_tosya.ko` to
   `ko/tosya.ko`, deleting the rest. No matching ko: the closest build is kept
   as `tosya.ko.try` for explicit diagnosis, never auto-loaded; the loader can
   adjust vermagic, it cannot fix a layout mismatch.
 - **Overwrite-install semantics**: an update replaces files only; the running
-  daemon and the loaded ko keep running until reboot. `module/ load.sh
-  tosya_load()` refuses a second insmod in the same boot via the
+  daemon and the loaded ko keep running until reboot.
+  `module/load.sh: tosya_load()` refuses a second insmod in the same boot via
+  the
   `state/.loaded` marker ("already loaded this boot; replacing the module
   requires a reboot"), so a same-boot double load cannot stack.
-- `module/ load.sh tosya_load()` picks the loader (`ksud` when present, else
+- `module/load.sh: tosya_load()` picks the loader (`ksud` when present, else
   the bundled `lkmloader`), logs `[load] <loader> rc=<rc>` either way, and on
   failure logs `[load] module not loaded; see the loader error above`.
 - **How an install failure is found** (any one of three, the dmesg one carries
@@ -39,6 +40,13 @@ post-fs-data did not, starts sync-tool).
   file in the module directory both make the manager skip `service.sh`
   entirely, so nothing loads and nothing starts; verified once by creating the
   `disable` file and rebooting (see the acceptance log below).
+- **Log rotation acceptance** (the threshold sits ~8 idle days out, so it is
+  never triggered naturally -- it has to be forced once to count as verified):
+
+      su -c 'head -c 5000000 /dev/zero >> /data/adb/modules/<id>/state/sync.log'
+      reboot
+      # then: state/sync.log.1 exists at ~5.1 MB, state/sync.log grows from 0,
+      # and sync.log's first new line reads "[svc] orphans left: 0"
 
 ## 2. Run
 
@@ -94,14 +102,14 @@ generation. The config is read from user 0 only
 
 ## 3. Remove
 
-What happens: the module manager runs `module/ uninstall.sh` with the
+What happens: the module manager runs `module/uninstall.sh` with the
 directory still in place, then deletes the directory. **There is no rmmod:**
 the module takes itself off the kernel's module list (`src/main.c`), so
 nothing can name it for removal -- the ko leaves with the reboot a removal
 asks for. The script therefore covers only what can outlive the directory:
 the sync-tool that `service.sh` started with `&`, and the state files.
 
-- `module/ uninstall.sh`: kills the daemon by exact /proc cmdline match
+- `module/uninstall.sh`: kills the daemon by exact /proc cmdline match
   (`pkill -f` is a substring ERE and would also hit anything merely mentioning
   the path), logs `[uninst] killed N, orphans left: M`, clears
   `state/.loaded` and `state/token`. `state/sync.log` is deliberately kept:
@@ -169,8 +177,73 @@ nor an app uid reaches it -- the signature of a gate that moved without the
 contract moving with it. Comments carry the *why*; the script and the warn
 carry the *must not break*.
 
-### To be recorded in later passes
+- **How a run failure is found** (the kernel's `injected` line is a pr_info
+  and never lands in sync.log -- a criterion that greps for it there condemns
+  a healthy device):
+  1. `state/sync.log` ends with `registered N app apk(s), X change(s) to send`,
+     where N matches the status line's `apk N` -- and N itself is a live
+     number: the count of packages `pm list packages` reports whose codePath
+     resolves, not a memorized figure from some device;
+  2. timestamps in sync.log grow; and installing or removing one app produces
+     a fresh `registered` line with a changed N -- that line is the "alive"
+     proof, not the boot-time one.
+- **Queue overflow** (`src/tools/watcher.cpp: handle_inotify_events()`): an
+  `IN_Q_OVERFLOW` is treated as interesting and re-arms the watches -- the
+  full resync it triggers is the correct answer to dropped events, never
+  "no event".
+- **rmmod does not exist and that is fine**: a netlink command in flight when
+  the module leaves gets ECONNREFUSED from a family that is gone -- a clean
+  userspace-visible error, not a kernel fault; the daemon is killed by
+  `module/uninstall.sh` before the directory goes anyway.
 
-- The boundary-table entries still owed by the final pass: g_hash snapshot
-  window, netlink in-flight vs rmmod, the apk array's bounded-lazy recycling,
-  the rotation placement rule.
+### The g_hash guess window (recorded with its cost, not implemented)
+
+`src/policy.c: g_hash` starts at the assumed `__uidhashfn` bits=7 shape and is
+re-detected at every apply (`detect_uid_hash()` reads the formula out of the
+running kernel's own `find_user()`). Between a uid change and the next apply,
+userspace can see the stale guess -- what that means concretely: a hidden
+target's replacement may hash to a different bucket than the kernel's own
+absent-uid walk would, so a cache-timing observer comparing the module's
+probed line against the kernel's line sees a mismatch for at most one policy
+generation. The window closes on the first apply after boot (the sync pushes
+the policy seconds after the module loads), and a wrong guess only degrades
+the indirection, never the hiding itself. Making the hash a published
+snapshot instead of a global is a hardening suggestion; the cost is a
+re-verification of every hash-touching path, and the benefit is a window that
+in practice closes before any policy exists to observe.
+
+### The apk record array is bounded by ever-installed, recycled lazily
+
+`src/inode_hook.c: shadow_arm()` parks records instead of freeing them (an
+inode may still point at the fops table a record made), so `g_shadow[]` is
+bounded by TOSYA_APK_MAX *records ever installed*, not live ones, and the
+memory is given back at unload. Records whose inode was reclaimed leave at
+the next stream end (`tosya_apk_stream_finish()`); records never armed and
+never reclaimed stay parked until then. On a device that installs and
+reinstalls apps heavily for months the array fills and `shadow_arm` refuses
+with `-ENOSPC` and a `pr_warn_once` -- the recovery is a reboot, which a
+module update asks for anyway. Cost accepted, not an oversight.
+
+### Rotation lives between the kill and the start, and only there
+
+`module/service.sh` rotates `sync.log` after killing a leftover daemon and
+before starting a new one -- nowhere else. The running sync-tool holds the
+log fd: an `mv` while it lives leaves it writing into the renamed inode, the
+fresh `sync.log` stays empty until reboot and the rotated copy grows forever.
+The comment in the script says the same thing; this entry exists so the next
+person who "simplifies" the script into a loop finds out here first.
+
+### Deferred, with the measurement that would reopen them
+
+- **dir-side empty-state static gate**: same shape as the find_user gate
+  (`tosya_active_key`), deferred until the `statloop` instrument shows the
+  empty-policy cost is real. The quantification contract: stat calls/second
+  through the guarded parents, worst-path p99 per lookup, and the delta
+  between armed and disarmed -- no gate without those numbers.
+- **KAUX_STAGED_BYTES 2 MiB -> 1 MiB**: waits for the measured peak staging
+  usage; the shrink is only worth a protocol touch if the peak says so.
+- **Rebuilding the dir-guard host test**: `extract_dir.py` +
+  `dir_host_test.c` existed only in a scratch tree and are gone; the suite
+  runs complete again, and the guard's coverage is device acceptance until
+  the ASan harness is rebuilt from `src/dir_hook.c`'s `TOSYA_DIR_TEST`
+  blocks.

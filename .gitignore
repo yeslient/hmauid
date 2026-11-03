@@ -19,3 +19,4 @@ dist/
 
 # The isotest apk artifact the build scripts drop beside their sources.
 scripts/isotest/isotest.apk
+__pycache__/

@@ -9,11 +9,11 @@ cd "$(dirname "$0")/.."
 
 fail=0
 while read -r file marker; do
-	[ -n "$marker" ] || continue
-	if ! grep -qF "$marker" "$file"; then
-		echo "  missing invariant $marker in $file"
-		fail=1
-	fi
+        [ -n "$marker" ] || continue
+        if ! grep -qF "$marker" "$file"; then
+                echo "  missing invariant $marker in $file"
+                fail=1
+        fi
 done <<'EOF'
 src/inline_hooks.c WZ-1
 src/lsm.c WZ-2
@@ -21,6 +21,6 @@ src/table_hooks.c WZ-3
 EOF
 
 if [ "$fail" -eq 0 ]; then
-	echo "invariants: OK"
+        echo "invariants: OK"
 fi
 exit "$fail"

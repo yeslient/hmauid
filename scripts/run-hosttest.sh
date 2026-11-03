@@ -12,6 +12,8 @@ cd "$(dirname "$0")/.."
 
 # The promises a refactor could silently delete, before anything else runs.
 scripts/check-invariants.sh
+# The lifecycle doc's anchors: a rename must fail here, not point at ghosts.
+python3 scripts/check_lifecycle_anchors.py
 
 out=build/policy_host_test
 cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$out" scripts/policy_host_test.c
