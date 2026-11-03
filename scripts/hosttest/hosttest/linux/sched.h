@@ -50,12 +50,12 @@ struct cred {
 	unsigned int fsuid;
 };
 #define __kuid_val(k) (k)
-#define for_each_process(p) for ((p) = nullptr; (p) != nullptr; (p) = nullptr)
-#define for_each_thread(p, t) for ((t) = nullptr; (t) != nullptr; (t) = nullptr)
+#define for_each_process(p) for ((p) = NULL; (p) != NULL; (p) = NULL)
+#define for_each_thread(p, t) for ((t) = NULL; (t) != NULL; (t) = NULL)
 static inline const struct cred *get_task_cred(const struct task_struct *t)
 {
 	(void)t;
-	return nullptr;
+	return NULL;
 }
 #define put_cred(c)        \
 	do {               \

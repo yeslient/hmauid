@@ -214,17 +214,20 @@ jobs:
       # Only "it builds and it verifies" -- the apk's behavior is a device
       # acceptance, not a CI one. The pinned dl.google.com artifacts are
       # fetched by the build script on first use.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
       - name: Build the isolated-process test app
         run: bash scripts/isotest/build-host.sh
       - name: Verify the apk
+        # Same working directory as the build: the tools live under the
+        # script's own .scratch, not the workspace root.
         run: |
           test -s scripts/isotest/isotest.apk
+          cd scripts/isotest
           java -jar .scratch/isotest-tools/bt34/android-14/lib/apksigner.jar \
-            verify scripts/isotest/isotest.apk
+            verify isotest.apk
 
   pack:
     name: pack and write the package
