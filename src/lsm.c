@@ -62,6 +62,11 @@ static int tosya_fix_setuid(struct cred *new, const struct cred *old, int flags)
 {
 	const u32 before = (u32)__kuid_val(old->fsuid);
 	const u32 after = (u32)__kuid_val(new->fsuid);
+	/* WZ-2 (docs/LIFECYCLE.md, invariants): the gate ignores a webview_zygote
+	 * birth on purpose -- its 1053 -> 90xxx move has a before that is neither
+	 * 0 nor an app uid, and such children are named by the apk they open, not
+	 * by a birth tag. A WebView renderer as an attribution test subject is
+	 * expected to produce no signal; that is the design, not a defect. */
 	const bool interesting = before == 0 ||
 				 (before % 100000u) >= TOSYA_APP_MIN;
 	int ret;
@@ -352,6 +357,11 @@ static int tosya_fix_setuid(struct cred *new, const struct cred *old, int flags)
 {
 	const u32 before = (u32)__kuid_val(old->fsuid);
 	const u32 after = (u32)__kuid_val(new->fsuid);
+	/* WZ-2 (docs/LIFECYCLE.md, invariants): the gate ignores a webview_zygote
+	 * birth on purpose -- its 1053 -> 90xxx move has a before that is neither
+	 * 0 nor an app uid, and such children are named by the apk they open, not
+	 * by a birth tag. A WebView renderer as an attribution test subject is
+	 * expected to produce no signal; that is the design, not a defect. */
 	const bool interesting = before == 0 ||
 				 (before % 100000u) >= TOSYA_APP_MIN;
 	int ret;

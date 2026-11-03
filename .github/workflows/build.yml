@@ -182,12 +182,49 @@ jobs:
           sudo apt-get install -y g++-14 nlohmann-json3-dev zlib1g-dev
       - name: Compile and link sync-tool for the host
         run: CXX=g++-14 bash scripts/build-host.sh
+      - name: Invariants
+        # The markers docs/LIFECYCLE.md's invariants section stands behind: a
+        # refactor that deletes one fails here instead of rotting the promise.
+        run: bash scripts/check-invariants.sh
       - name: Smoke
         run: |
           out=$(build/tools-host/sync-tool-host --bogus 2>&1) || rc=$?
           echo "${out}"
           echo "${out}" | grep -q '^usage:' || { echo 'no usage line'; exit 1; }
           [ "${rc:-0}" -eq 2 ] || { echo "exit code ${rc:-0}, expected 2"; exit 1; }
+
+  host-test:
+    name: host test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The whole suite, in its release configuration: the policy, inline
+      # relocation, tiers, shadow (ASan + TSan) and netlink flow tests, plus
+      # the invariant markers. Until this job existed the suite only ran where
+      # someone remembered to run it -- the dir-guard step went stale for
+      # months inside it without anyone noticing.
+      - name: Run the host suite
+        run: bash scripts/run-hosttest.sh
+
+  isotest-apk:
+    name: isotest apk builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Only "it builds and it verifies" -- the apk's behavior is a device
+      # acceptance, not a CI one. The pinned dl.google.com artifacts are
+      # fetched by the build script on first use.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Build the isolated-process test app
+        run: bash scripts/isotest/build-host.sh
+      - name: Verify the apk
+        run: |
+          test -s scripts/isotest/isotest.apk
+          java -jar .scratch/isotest-tools/bt34/android-14/lib/apksigner.jar \
+            verify scripts/isotest/isotest.apk
 
   pack:
     name: pack and write the package

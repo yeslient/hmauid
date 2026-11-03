@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.tosya.isotest"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
+
+    <application android:label="tosya iso test">
+        <!-- isolatedProcess: forked by the MAIN zygote (before == 0), which is
+             the birth path tosya's tagging gate can see. exported: the test
+             starts the service from adb shell (uid 2000); a non exported
+             service would throw SecurityException there, and an isolated
+             process cannot start itself. -->
+        <service android:name=".IsoService"
+            android:isolatedProcess="true"
+            android:exported="true"/>
+    </application>
+</manifest>

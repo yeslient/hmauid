@@ -16,3 +16,6 @@ dist/
 
 # Local agent workspace: review notes, downloaded headers for syntax checks.
 .workbuddy/
+
+# The isotest apk artifact the build scripts drop beside their sources.
+scripts/isotest/isotest.apk

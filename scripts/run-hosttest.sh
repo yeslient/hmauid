@@ -10,6 +10,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# The promises a refactor could silently delete, before anything else runs.
+scripts/check-invariants.sh
+
 out=build/policy_host_test
 cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$out" scripts/policy_host_test.c
 "$out"

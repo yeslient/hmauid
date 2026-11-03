@@ -141,7 +141,36 @@ changes to releasing the old table before bailing out, or the single
 allocation is split into table + slots, this proof expires and the boundary
 must be re-adjudicated.
 
+### Invariants (WZ: the tagging gates and the webview_zygote boundary)
+
+Three call-site families hand uid transitions to `src/tag.c: tosya_tag_note()`,
+each through a gate of the same shape (`before == 0 || before is an app uid`).
+The gate ignores a **webview_zygote birth on purpose**: a helper zygote forks
+at uid 1053 and then setresuids into the 90xxx isolated range, and that move's
+before side is neither 0 nor an app uid -- so it never reaches the tag note.
+That is the design, not a gap: an isolated child's identity comes from the apk
+it opens (`src/inode_hook.c: tosya_shadow_open()`), not from a birth tag, and
+a WebView renderer used as an attribution test subject produces **no signal by
+construction** -- acceptance item 4 once read that silence as a defect.
+
+- `WZ-1` -- `src/inline_hooks.c: tosya_setuid_inline_hook()`, the inline
+  setuid hook's gate.
+- `WZ-2` -- `src/lsm.c: tosya_fix_setuid()`, the LSM hook's gate; the file
+  carries two kernel-version variants (< 6.12 and >= 6.12) and both carry the
+  marker.
+- `WZ-3` -- `src/table_hooks.c: uid_change_hook()`, the syscall-table hook's
+  gate.
+
+Guarded two ways: `scripts/check-invariants.sh` greps for the markers (wired
+into CI and the host suite -- a dropped marker fails the check, not the
+promise), and debug builds (`TOSYA_DEBUG_ON()`) warn inside
+`src/tag.c: tosya_tag_note()` if a transition whose before side is neither 0
+nor an app uid reaches it -- the signature of a gate that moved without the
+contract moving with it. Comments carry the *why*; the script and the warn
+carry the *must not break*.
+
 ### To be recorded in later passes
 
-- The webview_zygote call-site invariants (WZ-1..3, with the tagging-gate
-  boundary that acceptance item 4 turned into a lesson).
+- The boundary-table entries still owed by the final pass: g_hash snapshot
+  window, netlink in-flight vs rmmod, the apk array's bounded-lazy recycling,
+  the rotation placement rule.

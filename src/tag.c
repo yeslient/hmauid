@@ -134,6 +134,17 @@ void tosya_tag_note(u32 before_sid, u32 after_sid, u32 old_uid, u32 new_uid)
 	(void)before_sid;
 	(void)after_sid;
 
+	/* The WZ gates (docs/LIFECYCLE.md, invariants) hand over only
+	 * transitions whose before side is 0 or an app uid: a helper zygote's
+	 * 1053 -> 90xxx move must never reach here, because such a child is
+	 * named by the apk it opens, not by a birth tag. Debug builds only --
+	 * a warn here means a call site's gate moved without this contract
+	 * moving with it. */
+	if (TOSYA_DEBUG_ON() && old_uid != 0 &&
+	    (old_uid % 100000u) < TOSYA_APP_MIN)
+		pr_warn("tosya: tag note on a gated-out transition %u -> %u\n",
+			old_uid, new_uid);
+
 	if ((new_uid % 100000u) >= TOSYA_ISOLATED_START) {
 		/*
 		 * An isolated child. Nothing in its own state names the app it belongs to: the context is
