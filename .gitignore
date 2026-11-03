@@ -20,3 +20,5 @@ dist/
 # The isotest apk artifact the build scripts drop beside their sources.
 scripts/isotest/isotest.apk
 __pycache__/
+# apksigner v4 signing metadata beside the apk artifact.
+*.idsig
