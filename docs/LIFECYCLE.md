@@ -114,8 +114,11 @@ the sync-tool that `service.sh` started with `&`, and the state files.
   the path), logs `[uninst] killed N, orphans left: M`, clears
   `state/.loaded` and `state/token`. `state/sync.log` is deliberately kept:
   after removal it is the only record of what the module did.
-- **How a remove failure is found**: `pgrep -f sync-tool` non-empty after the
-  script -- an orphan is the failure signal itself.
+- **How a remove failure is found**: a /proc cmdline **exactly equal** to
+  `<moddir>/sync-tool ` after the script -- an exact match is the failure
+  signal. A substring grep would count the checker's own shell (and the
+  uninstaller itself) as an orphan of its own crime; the scripts' leftover
+  count uses the same exact match as the kill for that reason.
 
 ## 4. Known boundaries
 

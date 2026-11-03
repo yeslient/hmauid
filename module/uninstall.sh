@@ -20,8 +20,15 @@ for p in /proc/[0-9]*/cmdline; do
   fi
 done
 sleep 0.2
-orphans=$(pgrep -fc "$MODDIR/sync-tool" 2>/dev/null)
-echo "[uninst] killed $killed, orphans left: ${orphans:-0}"
+# Same exact match for the leftover count: pgrep -fc would count this very
+# uninstaller (its own command line mentions the path) as an orphan of its
+# own crime.
+orphans=0
+for p in /proc/[0-9]*/cmdline; do
+  [ "$(tr '\0' ' ' < "$p" 2>/dev/null)" = "$MODDIR/sync-tool " ] &&
+    orphans=$((orphans + 1))
+done
+echo "[uninst] killed $killed, orphans left: $orphans"
 
 # The boot-scoped marker says "this boot loaded once"; leaving it behind would
 # let a later same-boot load.sh read a stale answer.
