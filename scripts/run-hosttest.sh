@@ -17,6 +17,10 @@ bash scripts/check-invariants.sh
 # The lifecycle doc's anchors: a rename must fail here, not point at ghosts.
 python3 scripts/check_lifecycle_anchors.py
 
+# Every test below drops its binary here, and a fresh checkout has no build/
+# until cmake makes one.
+mkdir -p build
+
 out=build/policy_host_test
 cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$out" scripts/policy_host_test.c
 "$out"
