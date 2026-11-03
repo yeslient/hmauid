@@ -635,6 +635,41 @@ static bool policy_pair_kept(u32 caller, u32 target)
 	return target >= 10000; // never hide target 0 or system uids
 }
 
+/*
+ * The two passes over the raw pairs, as one named stage. The count pass (tmp
+ * == NULL) sizes the scratch: the kept count decides the allocation, so it
+ * has to exist before the scratch does -- that is why there are two passes
+ * and not one. The fill pass then populates by the same filter, with the
+ * same cap and the same walk, so it writes exactly the pairs the count
+ * counted; a divergence between the two would make the allocation and the
+ * contents disagree.
+ */
+static u32 collect_pairs(const u32 *pairs, u32 npairs, struct apply_pair *tmp,
+			 u32 *wild_out)
+{
+	u32 i, n = 0, wild = 0;
+
+	for (i = 0; i < npairs && n < POLICY_MAX_PAIRS; i++) {
+		const u32 caller = pairs[2 * i];
+		const u32 target = pairs[2 * i + 1];
+
+		if (!policy_pair_kept(caller, target))
+			continue;
+		if (caller == 0) // caller 0: hide from everyone
+			wild = 1;
+		if (tmp != NULL) {
+			tmp[n].caller = caller;
+			tmp[n].target = target;
+		}
+		n++;
+	}
+	if (tmp == NULL && i < npairs)
+		pr_warn("tosya: policy of %u pair(s) truncated to the %u the table holds\n",
+			npairs, n);
+	*wild_out = wild;
+	return n;
+}
+
 int policy_apply(const u32 *pairs, u32 npairs)
 {
 	struct policy *np;
@@ -648,28 +683,7 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	if (!np)
 		return -ENOMEM;
 
-	/*
-	 * Count the pairs that survive the filter before allocating the scratch
-	 * array, and size it by that count. The old fixed request was
-	 * POLICY_MAX_PAIRS * sizeof(struct apply_pair) = 512 KiB, an order-7
-	 * allocation whatever the size of the policy actually sent; on a
-	 * fragmented boot that request fails, and the previous policy used to stay
-	 * armed with no trace that this one never landed.
-	 *
-	 * The filter itself is a shared helper: the count pass sizes the scratch
-	 * by it and the fill pass populates by it -- a divergence here would make
-	 * the allocation and the contents disagree.
-	 */
-	for (i = 0; i < npairs && kept < POLICY_MAX_PAIRS; i++) {
-		if (!policy_pair_kept(pairs[2 * i], pairs[2 * i + 1]))
-			continue;
-		if (pairs[2 * i] == 0) // caller 0: hide from everyone
-			wild = 1;
-		kept++;
-	}
-	if (i < npairs)
-		pr_warn("tosya: policy of %u pair(s) truncated to the %u the table holds\n",
-			npairs, kept);
+	kept = collect_pairs(pairs, npairs, NULL, &wild);
 
 	/* No target remains after filtering: publish the existing empty snapshot.
 	 * The target builder requires at least one target before interning a mask. */
@@ -692,15 +706,7 @@ int policy_apply(const u32 *pairs, u32 npairs)
 	}
 
 	/* Same filter as the count, so tmp[] holds exactly kept pairs. */
-	for (i = 0; i < npairs && n < kept; i++) {
-		u32 target = pairs[2 * i + 1];
-
-		if (!policy_pair_kept(pairs[2 * i], target))
-			continue;
-		tmp[n].caller = pairs[2 * i];
-		tmp[n].target = target;
-		n++;
-	}
+	n = collect_pairs(pairs, npairs, tmp, &wild);
 
 	if (n) {
 		struct uid_hash h;

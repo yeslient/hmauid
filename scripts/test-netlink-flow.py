@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import os
+import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src/netlink.c').read_text()
 start = source.index('static int kaux_begin(')
@@ -121,8 +122,10 @@ subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-I'+str(root/'src/inclu
 subprocess.run([str(out/'probe')], check=True, timeout=10)
 
 # Live host AF_UNIX control: /proc/net/unix reports the socket FD inode, not stat(path).
+# The socket lives in the short system temp dir: sun_path caps at 108 bytes and a
+# deeply nested checkout would overflow it from out/.
 import socket
-bound = out / "server.sock"
+bound = Path(tempfile.gettempdir()) / "tosya-netlink-flow.sock"
 try:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(bound))

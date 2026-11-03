@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `policy_apply()`'s two passes over the raw pairs are one named stage now (`collect_pairs()`):
+  the count pass (tmp == NULL) sizes the scratch, the fill pass writes it -- same filter, same
+  cap, same walk. The split is behavior-preserving and was proven so rather than asserted: the
+  host test grew a `--dump` mode that writes every apply's published snapshot field by field
+  (layout numbers, the full target table, the mask pool, the sparse caller table) plus 200
+  deterministic lookups per fixture, and the pre/post dumps of all four fixtures are
+  byte-identical (316193 lines). Two silent suite repairs came with it: run-hosttest.sh's
+  directory-guard step pointed at scripts that had only ever lived in a scratch tree and were
+  never committed, so the suite aborted there on every checkout but the one it was written in --
+  the dead step is removed and the lost dir-guard host coverage is recorded in docs/LIFECYCLE.md
+  with a rebuild scope; and the netlink flow test bound its AF_UNIX probe under .scratch, which
+  overflows sun_path from a deeply nested checkout -- the socket now lives in the system temp
+  dir.
+
 - The module gained the two lifecycle pieces it was missing, both around the daemon rather than
   the kernel: `module/uninstall.sh` now runs when a module manager removes the package -- it kills
   the sync-tool that service.sh started with `&` (exact /proc cmdline match, not `pkill -f`, whose

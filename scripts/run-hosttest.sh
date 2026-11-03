@@ -29,15 +29,11 @@ clang -std=c23 -O1 -Wall -Wextra -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src
   -I scripts/hosttest/hosttest -o "$tiers" scripts/tiers_test.c
 "$tiers"
 
-# The directory guard: six protected parent inodes, one visible child, and a caller
-# identity the test sets. The matrix is the promise -- ENOENT for the caller a name is
-# hidden from, the inode for everyone else, and no dentry left to answer for either.
-python3 scripts/extract_dir.py
-dir=build/dir_test
-clang -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -std=c23 -O1 -g \
-  -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
-  -Werror=invalid-pp-token -I build -o "$dir" scripts/dir_host_test.c
-"$dir"
+# The directory guard's host test (extract_dir.py + dir_host_test.c) is gone: it
+# was written in a scratch tree and never committed, so this suite aborted here
+# on every checkout but the one it was written in. Rebuilding it is recorded as
+# a boundary in docs/LIFECYCLE.md; until then the guard's coverage is the
+# device acceptance, not this suite.
 
 # Same sources, one more round under ASan/UBSan: a proxy outliving its owner is not
 # a warning, it is a fault the first time it runs.
@@ -90,9 +86,4 @@ clang -fsanitize=address,undefined -fno-omit-frame-pointer -std=c23 -O1 -g \
   -Wall -Wextra -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I src/include \
   -I scripts/hosttest/hosttest -o "$asan" scripts/tiers_test.c
 "$asan"
-
-plain=build/dir_test_plain
-clang -std=c23 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-function \
-  -I build -o "$plain" scripts/dir_host_test.c
-"$plain"
 

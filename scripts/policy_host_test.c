@@ -5,6 +5,7 @@
 #include "policy.c"
 #include "tag.c" /* the tag record moved out of policy.c; this test covers both */
 #include <stdio.h>
+#include <string.h>
 
 // the host never logs anything, but the key has to exist for the linker
 struct static_key_false tosya_debug_key;
@@ -12,6 +13,51 @@ struct static_key_false tosya_debug_key;
 // the host has no isolated windows to close
 
 static u32 g_fail;
+static int g_dump;
+
+/*
+ * --dump: write the published snapshot of every apply, field by field, plus
+ * 200 deterministic lookups per fixture. The output is the golden a refactor
+ * of the apply path is diffed against: structure equality alone cannot catch
+ * a fill-order change, the lookup results can.
+ */
+static void dump_snapshot(const char *tag, const u32 *pairs, u32 np)
+{
+	const struct policy *p = g_pol;
+	u32 i, k;
+	/* The pool's used length is not published; the allocation is
+	 * (npairs + 1) * nmask_words and the unused tail is zeros, so dumping
+	 * the allocation pins the used part too. */
+	const u32 pool = (p->npairs + 1u) * p->nmask_words;
+
+	printf("== %s ==\n", tag);
+	printf("npairs=%u ncallers=%u nlines=%u shift=%u mirror=%u probe=%u "
+	       "nmw=%u wild=%u\n",
+	       p->npairs, p->ncallers, p->nlines, p->shift, p->mirror,
+	       p->nprobe, p->nmask_words, p->wild);
+	for (i = 0; i < (u32)p->nlines * POLICY_WAY; i++)
+		printf("tgt %u %u %u\n", i, p->tgt[i].target, p->tgt[i].repl_k);
+	for (i = 0; i < pool; i++)
+		printf("msk %u %llu\n", i, (unsigned long long)p->mask_pool[i]);
+	for (i = 0; i < POLICY_APP_ID_SPAN; i++)
+		if (p->cid[i] != 0xffffu)
+			printf("cid %u %u\n", i, p->cid[i]);
+	for (k = 0; k < 100; k++) {
+		const u32 idx = (k * 7919u) % (np / 2);
+		const u32 c = pairs[2 * idx], t = pairs[2 * idx + 1];
+
+		printf("lookup %u %u %u -> %u\n", k, c, t,
+		       policy_lookup_as((uid_t)c, (uid_t)t));
+	}
+	for (k = 0; k < 100; k++) {
+		const u32 idx = (k * 104729u) % (np / 2);
+		const u32 c = pairs[2 * idx];
+		const u32 t = pairs[2 * idx + 1] + 317u + k * 13u;
+
+		printf("lookup off %u %u %u -> %u\n", k, c, t,
+		       policy_lookup_as((uid_t)c, (uid_t)t));
+	}
+}
 static u32 t_pairs[400 * 200 * 2];
 static u32 t_np;
 static u32 t_callers[400];
@@ -53,6 +99,8 @@ static void check_sweep(const char *tag, u32 *pairs, u32 np, u32 *callers,
 				fp++;
 		}
 	}
+	if (g_dump)
+		dump_snapshot(tag, pairs, np);
 	printf("%-22s pairs=%-5u callers=%-4u cells=%-7u unhidden=%u "
 	       "false_positive=%u\n",
 	       tag, np / 2, nc, cells, unhidden, fp);
@@ -170,7 +218,7 @@ static void repl_table_check(void)
 	printf("%-22s %s\n", "repl: window+bucket", bad ? "FAIL" : "PASS");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	u32 callers[7] = { 10376, 10377, 10378, 10379, 10380, 10381, 10382 };
 	u32 targets[19];
@@ -183,6 +231,8 @@ int main(void)
 	static u32 hugec[600];
 	static u32 bigc[400];
 	u32 bw = 0, bc = 0, hw = 0;
+
+	g_dump = argc > 1 && strcmp(argv[1], "--dump") == 0;
 
 	for (i = 0; i < 19; i++)
 		targets[i] = 10400 + i;
