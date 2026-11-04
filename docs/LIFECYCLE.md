@@ -236,6 +236,46 @@ fresh `sync.log` stays empty until reboot and the rotated copy grows forever.
 The comment in the script says the same thing; this entry exists so the next
 person who "simplifies" the script into a loop finds out here first.
 
+### The exit path is dead by construction
+
+`src/main.c: tosya_init()` ends with `kobject_del()` plus
+`list_del(&THIS_MODULE->list)` -- the module takes itself off the kernel's
+module list, and the comment there explains why it must stay the last thing
+init does. The consequence every teardown concern hangs from: `delete_module`
+finds its target only on that list, so **`rmmod` cannot name this module and
+`tosya_exit()` never runs** -- the unload path is unreachable, not merely
+unused. (The ko still leaves with a reboot, which every update asks for.)
+
+That reachability fact bounds a real kernel-semantics gap one level down: the
+table and LSM tier removes restore their slots and then wait a grace period
+(`src/table_hooks.c: uid_tables_remove()`, `src/lsm.c` both variants -- the
+table side goes through `tosya_patch_text`, i.e. stop_machine). stop_machine
+stops CPUs, not tasks, and syscall dispatch holds no RCU read lock: on a
+`CONFIG_PREEMPT_RCU` kernel a task preempted inside `uid_change_hook` does
+not block the grace period, so a grace period after unpatch proves nothing.
+On `PREEMPT_NONE/VOLUNTARY` the running task itself is the RCU read side and
+the wait holds. Since the exit is unreachable, this is recorded, not fixed.
+
+**Invalidation condition**: if the self-unlink in `tosya_init()` is ever
+removed -- typically for debugging -- the table and LSM tier removes must
+wait for `synchronize_rcu_tasks()` (resolved through `tosya_sym`, it is not
+exported everywhere) before returning, or refuse to unload and demand a
+reboot. Until then this entry, not a patch, is the guard.
+
+Two adjacent claims adjudicated against the same path:
+
+- The apk records freed at remove with unresolved inodes
+  (`src/inode_hook.c: tosya_apk_remove()`) are safe **independently** of the
+  unreachability: unresolved means either the record never armed
+  (`orig_fops == NULL`, nothing points at its table) or `ilookup()` could not
+  find the inode -- and an inode carrying our `i_fop` stays in the inode hash
+  until eviction, because any dentry holding it holds a reference, so a
+  still-live `i_fop` is always still resolvable and gets restored. An open
+  file pins the module through `owner` regardless.
+- `src/tiers.c: tosya_tier_revert_all()` has no caller in the kernel side on
+  purpose: it is the symmetric teardown the tiers host test drives three
+  times (`scripts/tiers_test.c`), not dead code.
+
 ### Deferred, with the measurement that would reopen them
 
 - **dir-side empty-state static gate**: same shape as the find_user gate

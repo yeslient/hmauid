@@ -151,6 +151,13 @@ u32 policy_lookup_as(uid_t caller, uid_t target);
  * fourteen bits hold one plus its offset. The window bit is above that field,
  * not inside it -- a tag with the top bit set would read back as "still
  * waiting" and the task would be renamed on every file it opened.
+ *
+ * Bits 40..55 are a de-facto global reservation: nothing else in this kernel
+ * numbers them today, and any later claimant would collide with tags that are
+ * never reclaimed -- the module takes itself off the kernel's module list, so
+ * the tags outlive it until reboot, and a colliding user of the same bits
+ * would answer for identities this module wrote. Any reuse of this range
+ * has to start from that fact.
  */
 #define TOSYA_TAG_SHIFT 40
 #define TOSYA_TAG_MASK 0x3fffUL
