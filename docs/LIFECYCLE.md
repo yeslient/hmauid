@@ -65,6 +65,13 @@ the tool.
   timerfds are CLOCK_MONOTONIC (`src/tools/watcher.cpp: Watcher::open()`),
   which does not advance in suspend, so the lifetime figure is an upper bound
   across all power states.
+- Re-measured on 0.7.0+ci.39 over the BakaSU GKI kernel (2026-11-07, 24 h
+  uptime): the 60 s steady-state delta is now **0 ticks** -- below the 1-tick
+  noise floor; voluntary context switches ~1/s (the poll tick, inotify
+  quiet); the 24 h lifetime is 3042 ticks = 30.4 s = 0.035% of one core,
+  including all screen-off periods and all event-driven sync work (overnight
+  app updates re-commit packages.xml). Idle cost on this kernel is strictly
+  lower than on the stock one.
 - Decision, recorded so it is not re-litigated: raising the post-unlock poll
   timeout from 1 s to 10 s was proposed as a power win; the measured saving
   (~0.16 s of CPU per 6 h) is below the 1-tick noise floor, and the change
@@ -278,11 +285,21 @@ Two adjacent claims adjudicated against the same path:
 
 ### Deferred, with the measurement that would reopen them
 
-- **dir-side empty-state static gate**: same shape as the find_user gate
-  (`tosya_active_key`), deferred until the `statloop` instrument shows the
-  empty-policy cost is real. The quantification contract: stat calls/second
-  through the guarded parents, worst-path p99 per lookup, and the delta
-  between armed and disarmed -- no gate without those numbers.
+- **dir-side empty-state static gate**: measured 2026-11-07 with the
+  `statloop` instrument (scripts/statloop.c, NDK-built, 5 runs x 2
+  directories per side, cached-negative path, matched load): the
+  armed-vs-disarmed median delta is **+54 ns (guarded parent) / +84 ns
+  (unprotected parent)** per lookup -- the same direction on both, i.e. the
+  hook entry + hash + fixed-slot probe costs roughly 50-90 ns, or 3-6% of
+  one cached lookup (~1.55 us). Stat capacity: ~650k/s single-threaded
+  either way. **Verdict: the gate is not worth doing.** Even at the upper
+  bound, an IO-extreme app doing 10k lookups/s pays 0.9 ms/s = 0.09% of one
+  core; and the empty state it would accelerate never occurs on a device
+  with directory rules configured (4 dirs, 61 names here). The distributions
+  overlap, so 50 vs 90 ns is not individually resolvable -- the verdict
+  holds at any value in that band. The contract's p99 item stays open only
+  if a per-op tail question ever becomes real; the mean-based capacity
+  answers this decision.
 - **KAUX_STAGED_BYTES 2 MiB -> 1 MiB**: waits for the measured peak staging
   usage; the shrink is only worth a protocol touch if the peak says so.
 - **Rebuilding the dir-guard host test**: `extract_dir.py` +
