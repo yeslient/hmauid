@@ -283,6 +283,54 @@ Two adjacent claims adjudicated against the same path:
   purpose: it is the symmetric teardown the tiers host test drives three
   times (`scripts/tiers_test.c`), not dead code.
 
+### Default-deny priority probing for unscooped callers (designed, gated, not built)
+
+A hardening proposal would make the kernel answer every cross-app priority
+probe from an unscoped caller with -ESRCH (the fgetpriority / HMA-OSS
+semantics) instead of today's pass-through. Adjudicated as **feasible but
+feature-sized, not a few-line change** -- four prerequisites stand between
+the idea and this tree:
+
+1. the protocol cannot express "explicitly scoped but no valid targets":
+   an empty-scope caller and an unscoped one are both absent from the
+   POLICY stream, so a cid-based blanket would wrongly deny explicitly
+   configured callers (and a mask-word check fails the same way -- an
+   empty scope has zero mask bits too). Closing this needs caller-set
+   metadata: a new stream, extended records, or a protocol bump, touching
+   kaux.h, the sender, the kernel snapshot and the host netlink tests;
+2. the tagless/isolated lifecycle keeps its semantics: pre-load processes
+   are never inferred as callers, and a pending isolated child closes its
+   pending window on first query (`src/tag.c: tosya_tag_note()`,
+   `tosya_tag_unmark()`); a blanket keyed on "no tag" would break that;
+3. the deny decision must spell out its exemptions explicitly
+   (tagless/system caller, target app-id < 10000, caller == target,
+   pending isolated) rather than relying on userspace not producing such
+   pairs -- default-deny sweeps every non-hit target into scope;
+4. the hot path carries a documented timing invariant -- "a target that
+   is hidden and one that was never configured leave through the same
+   instructions" (`src/include/tosya.h: policy_query()`); a caller-level
+   deny branch is defensible (a caller's own scope is not
+   attacker-malleable per query, unlike the target argument), but that
+   argument has to be made and reviewed, not assumed.
+
+**Landing order when triggered**: a tri-state `policy_decide()`
+(ALLOW/HIDE/DENY) implemented without changing defaults; scope-membership
+metadata in the snapshot; both entry paths wired (find_user returns NULL,
+the syscall-table path returns -ESRCH -- never a special uid through the
+original syscall); pending-isolated and tagless behavior preserved; host
+matrix (scope-hit, scope-no-target, unscoped-tagged, self, system-target,
+wildcard, isolated pre/post naming/no-hit, find_user vs the four USER
+syscalls consistent); device tests last. **Trigger**: the first observed
+wild-family detector outside scope whose probing actually attributes a
+hidden app. Until then the scope config is the access control list for
+both layers, and the filter semantics converged on independently by
+HMA-OSS and fgetpriority (exempt system / own-uid / < 10000, isolated-uid
+mapping, cache-first decisions) stand as the validated reference. The
+power figures quoted for HMA-OSS (~1-3 us per hit, ~0.01% of one core)
+are order-of-magnitude engineering estimates -- the counter-means-hits
+reading is source-verified, the absolute numbers are not: they need a
+device benchmark.
+
 ### Deferred, with the measurement that would reopen them
 
 - **dir-side empty-state static gate**: measured 2026-11-07 with the
