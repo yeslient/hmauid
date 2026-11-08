@@ -526,6 +526,11 @@ Pairs HmaOssRules::expand(const PackageDb &packages,
                           const Presets &presets) const {
   Pairs pairs;
   std::size_t callers = 0;
+  /* HMA-OSS's JsonConfig defaults detailLog to false. Invalid optional
+   * logging values also leave details off without rejecting the rules. */
+  const auto detail = config_.find("detailLog");
+  const bool detail_log =
+      detail != config_.end() && detail->is_boolean() && detail->get<bool>();
 
   if (scope_ != nullptr)
     for (const auto &[caller, entry] : scope_->items()) {
@@ -537,10 +542,9 @@ Pairs HmaOssRules::expand(const PackageDb &packages,
             return hides(caller, target, target_is_system, presets);
           });
       ++callers;
-      /* One line per caller: a parse that did not happen shows up in the log
-       * alone. */
-      Log::info("  {}: {} pair(s) ({})", caller, pairs.size() - before,
-                describe(entry, presets));
+      if (detail_log)
+        Log::info("  {}: {} pair(s) ({})", caller, pairs.size() - before,
+                  describe(entry, presets));
     }
 
   dedupe(pairs);

@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 #include <deque>
 #include <fstream>
 #include <iostream>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 using namespace tosya;
@@ -340,6 +342,77 @@ void early_install_event()
 	assert(events.empty() && retries == 1);
 	trace("throttled-pass-arms-retry");
 }
+
+std::string sync_log(Syncer &sync)
+{
+	std::fflush(stderr);
+	FILE *capture = std::tmpfile();
+	assert(capture != nullptr);
+	const int saved = dup(STDERR_FILENO);
+	assert(saved >= 0);
+	const int redirected = dup2(fileno(capture), STDERR_FILENO);
+	assert(redirected >= 0);
+	sync.sync_now();
+	std::fflush(stderr);
+	const int restored = dup2(saved, STDERR_FILENO);
+	assert(restored >= 0);
+	close(saved);
+	std::rewind(capture);
+	std::string log;
+	char buffer[1024];
+	while (const auto size = std::fread(buffer, 1, sizeof(buffer), capture))
+		log.append(buffer, size);
+	assert(!std::ferror(capture));
+	std::fclose(capture);
+	return log;
+}
+
+void detail_logging()
+{
+	fs::create_directories(root / "users/0");
+	fs::create_directories(root / "users/999");
+	write(root / "state/token", std::string(16, 't'));
+	package_xml();
+	Syncer sync{ once_config() };
+	const Pairs expected{ { 10001, 10002 }, { 99910001, 99910002 } };
+	// The same daemon must pick up toggles without republishing unchanged data.
+	for (const auto &[field, enabled] :
+	     std::vector<std::pair<std::string_view, bool>>{
+		     { "", false },
+		     { R"("detailLog":false,)", false },
+		     { R"("detailLog":true,)", true },
+		     { R"("detailLog":false,)", false },
+		     { R"("detailLog":"true",)", false },
+		     { R"("detailLog":null,)", false },
+		     { R"("detailLog":1,)", false } }) {
+		reset();
+		const bool first = !sync.policy_pushed_;
+		write(root / "config.json",
+		      std::string{ "{" } + std::string{ field } +
+			      R"("configVersion":4,"scope":{
+"com.example.caller":{"extraAppList":["com.example.target"]}}})");
+		const auto log = sync_log(sync);
+		assert(log.contains("  com.example.caller: 1 pair(s) (") ==
+		       enabled);
+		assert(log.contains("1 caller(s), 1 pair(s)"));
+		assert(log.contains("registered 3 app apk(s),"));
+		assert(sync.sync_ok_ && retries == 0 &&
+		       sync.pushed_ == expected);
+		if (first) {
+			assert(policies.size() == 1 && policies[0] == expected);
+			assert(names.size() == 1 && names[0].size() == 2);
+			assert(batches.size() == 1 && batches[0].size() == 3);
+		} else {
+			assert(policies.empty() && names.empty() &&
+			       batches.empty());
+		}
+	}
+	reset();
+	write(root / "config.json", "{");
+	assert(sync_log(sync).contains("! cannot parse"));
+	assert(!sync.sync_ok_ && retries == 1 && sync.pushed_ == expected);
+	trace("detail-log-toggle-preserves-policy-summary-and-warnings");
+}
 } // namespace
 
 namespace tosya
@@ -413,5 +486,6 @@ int main()
 	orchestration();
 	failure_boundaries();
 	early_install_event();
+	detail_logging();
 	std::cout << "sync flow: passed\n";
 }
