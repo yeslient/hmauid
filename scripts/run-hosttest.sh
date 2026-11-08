@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 bash scripts/check-invariants.sh
 # The lifecycle doc's anchors: a rename must fail here, not point at ghosts.
 python3 scripts/check_lifecycle_anchors.py
+python3 scripts/test-debug-build.py
 
 # Every test below drops its binary here, and a fresh checkout has no build/
 # until cmake makes one.

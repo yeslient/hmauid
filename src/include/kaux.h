@@ -5,10 +5,7 @@
  * The module (src/netlink.c) and the userspace half both include this file, so the two
  * ends of the protocol cannot drift apart.
  *
- * This is a streaming protocol, and only the changes travel. A rule set has no
- * ceiling -- every apk, every extracted native library, and every drop the
- * module's ledger computes on a package change -- and staging a whole set in the
- * kernel is what would put one there:
+ * Each stream carries one kind of data, with kind-specific publication rules:
  *
  *   KAUX_CMD_PING    -> ACK                    nothing, alive and version
  *   KAUX_CMD_BEGIN   blob = struct kaux_begin  what the stream is about
@@ -16,10 +13,12 @@
  *   KAUX_CMD_END     blob = nothing            this stream is finished
  *   KAUX_CMD_STATUS  -> reply: KAUX_ATTR_STATUS = struct kaux_status
  *
- * A record is applied as it arrives and nothing else happens at the end: the set is
- * exactly what was added and not removed. Drops are records of their own, not an
- * absence -- the module keeps the ledger and says what to remove, so the kernel never
- * has to diff anything and a stream that stops halfway stops.
+ * POLICY and NAMES stage complete sets and publish at END; an empty set clears
+ * the previous one. APK ADD/DEL records take effect during BATCH; END sweeps
+ * cached inodes, rebuilds the index and reports status. Omitted APK identities
+ * remain registered, so userspace keeps the delta ledger. TOKEN changes during
+ * BATCH and must precede the NAMES set whose masks use it. These streams are
+ * separate operations, not one atomic transaction, and have bounded capacity.
  *
  * Everything is little endian and a multiple of four bytes long, so the
  * structures below are the wire image as they stand, with no packing.
@@ -35,6 +34,9 @@
 
 #define KAUX_FAMILY_NAME "tosya"
 #define KAUX_FAMILY_VERSION 7u
+
+/* Policy capacity shared by the producer and the kernel snapshot builder. */
+#define KAUX_MAX_POLICY_PAIRS 65536
 
 // One attribute carries the payload in either direction.
 enum {

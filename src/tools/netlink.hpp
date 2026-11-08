@@ -51,8 +51,7 @@ public:
   NetlinkClient(const NetlinkClient &) = delete;
   NetlinkClient &operator=(const NetlinkClient &) = delete;
 
-  /* The kernel holds at most POLICY_MAX_PAIRS pairs (src/include/tosya.h). */
-  static constexpr std::size_t kMaxPairs = 65536;
+  static constexpr std::size_t kMaxPairs = KAUX_MAX_POLICY_PAIRS;
 
   /* The 128-bit token the directory masks are derived from. Sent ahead of the
    * names; the kernel keeps it until the next token stream replaces it. */

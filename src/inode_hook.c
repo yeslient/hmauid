@@ -3,7 +3,7 @@
  * inode_hook.c - naming a child from the apk it opens.
  *
  * The first file of its own code that an isolated child opens is what gives it
- * its identity. Every app that has rules has its base.apk's ->open replaced with
+ * its identity. Registered app APKs have their ->open replaced with
  * a copy of the inode's file_operations that differs in that one member and
  * carries the app id behind it, so the first open of its own code names the
  * whole thread group (tag.c keeps the record).
@@ -41,8 +41,9 @@
  * One record, and one table inside it, for one file: a record is never given to
  * another file, because the inode it was made for may still point at that table
  * (nothing is holding the inode, on purpose) and every open through it has to
- * keep finding the operations it was made for. Records are freed at unload and
- * not before.
+ * keep finding the operations it was made for. An inode's reclaim marks its record
+ * for retirement at stream END, after index replacement and an RCU grace period.
+ * Parked records whose inodes have not been reclaimed remain allocated.
  *
  * Asked from the open path, declared here so the block carries its own dependencies (the host test
  * lifts it out of this file unchanged).
@@ -63,10 +64,9 @@ struct tosya_shadow {
 	u32 dev;
 	u64 ino;
 	/*
-	 * A record whose file is gone. It stays allocated -- a task may still be holding the pointer it
-	 * read from that inode -- and is reused by the next replacement, so the array is bounded by
-	 * TOSYA_APK_MAX records ever installed, not live ones, and the memory is freed at unload:
-	 * a record is parked for good, because an inode may still be pointing at its table.
+	 * A removed identity. Its record is never reused for a replacement: the old
+	 * inode may still point at its table. It stays allocated until that inode is
+	 * reclaimed and a stream END retires it through RCU, or until unload.
 	 */
 	bool parked;
 	/*
@@ -115,7 +115,7 @@ struct tosya_index_slot {
  * One table is one object, and it never changes after it is published: the size and the slots are
  * read together by callers that take nothing -- every new inode asks whether it is ours, and that
  * is a hot path. A table that has been replaced stays where it is; nothing is handed back to the
- * allocator while a reader may still be walking it.
+ * allocator until an RCU grace period has protected its readers.
  */
 struct tosya_index {
 	u32 bits;
@@ -526,10 +526,6 @@ __maybe_unused static void shadow_drop_id(u32 dev, u64 ino)
 }
 
 /*
- * Streaming: one record names one file and carries its generation. ADD goes through
- * shadow_arm, DEL through shadow_drop_id (parking); the two share code, not meaning.
- */
-/*
  * The inode that carried a record is being reclaimed. Nothing can reach the record through it any
  * more, so it is marked for the next push to take out -- not freed here, because a reader may still
  * be inside the table that points at it.
@@ -764,9 +760,9 @@ int tosya_apk_stream(u32 op, u32 uid, u32 dev, u64 ino, const char *path,
 }
 
 /*
- * End of a stream: entries outside this generation leave. Parking is leaving -- lookups skip them,
- * and the record itself stays allocated, because an inode may still be pointing at its table: the
- * memory is bounded by TOSYA_APK_MAX and given back at unload.
+ * End of a delta stream: sweep cached inodes, publish an index of non-parked
+ * records and retire reclaimed records through RCU. Omission is not deletion;
+ * DEL parks a record, and inode reclaim makes it eligible for retirement.
  */
 u32 tosya_apk_stream_finish(void)
 {
@@ -776,8 +772,8 @@ u32 tosya_apk_stream_finish(void)
 
 	mutex_lock(&g_shadow_lock);
 	/*
-	 * The one moment the table is rebuilt: what the stream left out is left out here too, so a
-	 * table never carries the history of what it held and the lookup stays two buckets. The table it replaces goes to RCU.
+	 * Rebuild from every non-parked record, including identities unchanged by
+	 * this stream. The replaced index is retired through RCU.
 	 */
 	index_rebuild_locked();
 	/*

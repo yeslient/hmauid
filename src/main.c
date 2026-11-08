@@ -69,7 +69,8 @@ static int __init tosya_init(void)
 	/* An inline tier may pin this module and publish a kernel entry below.
 	 * Module-loader failure frees even pinned modules: no error return after
 	 * this point. Individual unsupported tiers report their own status. */
-	pr_info("tosya: ready (%d hook(s))\n", hooks_install());
+	hooks_install();
+	pr_info("tosya: initialization complete\n");
 
 	/*
 	 * Take the module's own name back off the list.

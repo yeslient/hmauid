@@ -29,7 +29,7 @@ if [ "$kmi" = android17-6.18 ]; then
   args+=("MO=$stage")
 fi
 if [ "$debug" = 1 ]; then
-  args+=(KCFLAGS=-DUF_DEBUG_ALWAYS=1)
+  args+=(KCFLAGS=-DTOSYA_DEBUG_ALWAYS=1)
 fi
 if [ -n "${UG_KBUILD_JOBS:-}" ]; then
   args+=("-j$UG_KBUILD_JOBS")

@@ -3,6 +3,8 @@
 #ifndef TOSYA_H
 #define TOSYA_H
 
+#include "kaux.h"
+
 #include <linux/jump_label.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -52,7 +54,7 @@ static inline bool tosya_package_name_ok(const u8 *name, u32 len)
 }
 
 // more than the host test's largest policy carries
-#define POLICY_MAX_PAIRS 65536
+#define POLICY_MAX_PAIRS KAUX_MAX_POLICY_PAIRS
 
 /*
  * Two tables. The target table is read on every query and is indexed like the
@@ -175,9 +177,8 @@ u32 policy_lookup_as(uid_t caller, uid_t target);
 #define TOSYA_TAG_PENDING (1UL << 55)
 
 /*
- * App apks whose open is replaced. 10000 was one user's app-id range, and that is no longer the
- * whole set: every extracted native library is an entry too (its open is what names a native
- * isolated child), and a real device carries a few thousand of those. 65536 holds both with room.
+ * Allocated APK shadow records, including parked records awaiting inode reclaim.
+ * This kernel allocation bound is independent of the userspace collection cap.
  */
 #define TOSYA_APK_MAX 65536
 
@@ -213,9 +214,9 @@ u32 tosya_dir_name_count(void);
 u32 tosya_dir_guard_count(void);
 
 /*
- * Streaming upload entry points (used by netlink.c): one record lands one file, gen is
- * the generation of this upload. finish parks every entry outside that generation and
- * returns how many stayed.
+ * Streaming upload entry points (used by netlink.c): ADD registers a file identity,
+ * DEL parks it. finish sweeps cached inodes, rebuilds the index and retires reclaimed
+ * records through RCU; identities omitted from a stream remain registered.
  */
 struct inode;
 // Matching a token costs its length, not the size of the list. Returns the matched length.
