@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "apk_publisher.hpp"
 #include "netlink.hpp"
 #include "packages.hpp"
 #include "paths.hpp"
@@ -114,16 +115,7 @@ private:
   /* When the last pass started: boot churn commits packages.xml many times a
    * second, and the pass throttle coalesces them (see sync_now). */
   std::optional<std::chrono::steady_clock::time_point> last_pass_start_;
-  using ApkId = std::pair<std::uint32_t, std::uint64_t>;
-  enum class ApkPhase { Confirmed, Adding, Dropping };
-  struct PublishedApk {
-    ApkEntry entry;
-    ApkPhase phase = ApkPhase::Adding;
-  };
-  /* A command can take effect even if its reply is lost. Adding means the
-   * identity may be installed; Dropping must finish before another add for
-   * that inode. Neither uncertainty may be discarded on a config change. */
-  std::map<ApkId, PublishedApk> published_;
+  ApkPublisher apk_publisher_;
 };
 
 } // namespace tosya

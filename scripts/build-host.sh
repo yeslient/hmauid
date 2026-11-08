@@ -26,6 +26,7 @@ CXX="${CXX:-g++}"
   -I src/tools -I src/include -I scripts/hosttest/host \
   src/tools/abx.cpp src/tools/text_xml.cpp src/tools/packages_xml.cpp \
   src/tools/main.cpp src/tools/sync.cpp src/tools/watcher.cpp \
+  src/tools/policy_plan.cpp src/tools/apk_collector.cpp src/tools/apk_publisher.cpp \
   src/tools/netlink.cpp src/tools/status.cpp src/tools/rules.cpp \
   src/tools/preset_rules.cpp src/tools/packages.cpp src/tools/paths.cpp \
 scripts/hosttest/android_props_stub.cpp \

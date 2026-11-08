@@ -18,6 +18,9 @@ add_executable(sync-tool
     packages_xml.cpp
     main.cpp
     sync.cpp
+    policy_plan.cpp
+    apk_collector.cpp
+    apk_publisher.cpp
     watcher.cpp
     netlink.cpp
     status.cpp

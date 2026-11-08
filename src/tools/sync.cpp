@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "sync.hpp"
+#include "apk_collector.hpp"
+#include "policy_plan.hpp"
 #include "status.hpp"
 
 #include "oss_presets.hpp"
@@ -24,8 +26,6 @@ namespace tosya {
 namespace {
 
 constexpr std::string_view kAppRoot = "/data/app";
-/* The kernel takes this many caller code dirs. */
-constexpr std::size_t kApkLimit = 10000;
 
 /* One line describing what the kernel says it hooked: what the module
  * description in the KernelSU or Magisk list shows a user. */
@@ -137,40 +137,6 @@ constexpr std::size_t kApkLimit = 10000;
     return std::nullopt;
   std::filesystem::permissions(file, std::filesystem::perms::owner_read, ec);
   return words;
-}
-
-/* The layouts that name their apk something no stat guess can predict: an
- * apex module (Foo@1.2.3/Foo.apk), an overlay (Name/NameOverlay.apk), a
- * preinstalled app shipped under its own file name (MIUIScreenRecorder.apk).
- * One readdir answers all three, but only when the choice is unambiguous:
- * exactly one apk, or a base.apk among several. A split-only directory has
- * several parts and no base; naming the package after one part would put the
- * wrong inode in the table, so that one stays unregistered as before. */
-[[nodiscard]] std::filesystem::path apk_in(const std::filesystem::path &dir) {
-  std::error_code ec;
-  std::filesystem::directory_iterator it{dir, ec};
-  if (ec)
-    return {};
-  std::filesystem::path first;
-  std::filesystem::path base;
-  std::size_t count = 0;
-  for (const auto &entry : it) {
-    if (entry.path().extension() != ".apk")
-      continue;
-    std::error_code entry_ec;
-    if (!entry.is_regular_file(entry_ec) || entry_ec)
-      continue;
-    ++count;
-    if (count == 1)
-      first = entry.path();
-    if (entry.path().filename() == "base.apk")
-      base = entry.path();
-  }
-  if (!base.empty())
-    return base;
-  if (count == 1)
-    return first;
-  return {};
 }
 
 } // namespace
@@ -358,37 +324,15 @@ void Syncer::sync_now(std::string_view why) {
     watcher_.arm_retry();
     return;
   }
-  Rules *rules = opened->rules.get();
-  const Presets &presets = opened->presets;
-  Pairs pairs = rules->expand(*packages, presets);
-
-  /* The names records fold to app ids on the kernel side (a record's caller is
-   * taken modulo the user span), so the guard is built from the pairs before
-   * the per-user expansion: one record covers every user. */
-  const Pairs base_pairs = pairs;
-
-  /* The rules are per package, so every user answers
-   * for its own uids. */
-  pairs = expand_users(pairs, *users);
-  std::ranges::sort(pairs, [](const Pair &a, const Pair &b) {
-    return a.caller != b.caller ? a.caller < b.caller : a.target < b.target;
-  });
-  pairs.erase(std::unique(pairs.begin(), pairs.end(),
-                          [](const Pair &a, const Pair &b) {
-                            return a.caller == b.caller && a.target == b.target;
-                          }),
-              pairs.end());
-
-  /* The kernel holds this many pairs; another
-   * attempt cannot change the count.
-   */
-  if (pairs.size() > NetlinkClient::kMaxPairs) {
-    Log::warn("{} pair(s) is more than the kernel "
-              "holds ({}); keeping the "
+  const auto plan =
+      build_policy_plan(*opened->rules, opened->presets, *packages, *users);
+  if (!plan) {
+    Log::warn("{} pair(s) is more than the kernel holds ({}); keeping the "
               "previous policy",
-              pairs.size(), NetlinkClient::kMaxPairs);
+              plan.error(), NetlinkClient::kMaxPairs);
     return;
   }
+  const auto &pairs = plan->pairs;
 
   const auto same_pair = [](const Pair &a, const Pair &b) {
     return a.caller == b.caller && a.target == b.target;
@@ -414,23 +358,7 @@ void Syncer::sync_now(std::string_view why) {
    * uid can carry several names and the guard is per directory. The token goes
    * first, because the masks are derived from it at publication. */
   {
-    std::map<std::uint32_t, std::vector<std::string>> names_of_uid;
-    for (const auto &[name, info] : packages->by_name())
-      names_of_uid[info.uid].emplace_back(std::string{name});
-
-    std::set<std::pair<std::uint32_t, std::string>> seen;
-    std::vector<HiddenName> names;
-    names.reserve(base_pairs.size());
-    for (const auto &pair : base_pairs) {
-      const auto ns = names_of_uid.find(pair.target);
-      if (ns == names_of_uid.end())
-        continue;
-      for (const auto &name : ns->second) {
-        if (!seen.emplace(pair.caller, name).second)
-          continue;
-        names.push_back(HiddenName{.caller = pair.caller, .name = name});
-      }
-    }
+    const auto &names = plan->names;
 
     const auto same_name = [](const HiddenName &a, const HiddenName &b) {
       return a.caller == b.caller && a.name == b.name;
@@ -463,20 +391,7 @@ void Syncer::sync_now(std::string_view why) {
     }
   }
 
-  std::set<std::uint32_t> caller_uids;
-  bool wild = false;
-  for (const auto &pair : pairs) {
-    if (pair.caller == 0)
-      wild = true;
-    else
-      caller_uids.insert(pair.caller);
-  }
-
-  callers_.clear();
-  for (const auto &[name, info] : packages->by_name()) {
-    if (wild || caller_uids.contains(info.uid))
-      callers_.emplace(name, info.uid);
-  }
+  callers_ = plan->callers;
 
   /* packages() clears old paths when a new database snapshot is read. With
    * the same snapshot, preserve early caller-directory hints across retries
@@ -499,197 +414,26 @@ void Syncer::sync_now(std::string_view why) {
 }
 
 bool Syncer::publish_code_dirs() {
-  std::vector<ApkEntry> entries;
-  entries.reserve(callers_.size());
-  /* One entry per directory, even when several packages share a uid. */
-  /* One entry per apk file, even when several packages share a code dir. */
-  std::set<std::string, std::less<>> seen;
-
-  /*
-   * Every installed app, not only the callers: the table is what lets the
-   * kernel name an isolated process by the apk it opens, and its host is
-   * whatever app spawned it -- a WebView renderer, a renderer service,
-   * anything. The callers go in first, so a table that hits the cap still
-   * carries the ones the policy needs.
-   */
-  std::vector<std::pair<std::string, std::uint32_t>> wanted;
-  wanted.reserve(packages_ ? packages_->by_name().size() : callers_.size());
-  for (const auto &[name, uid] : callers_)
-    wanted.emplace_back(name, uid);
-  if (packages_) {
-    for (const auto &[name, info] : packages_->by_name()) {
-      if (info.uid < kFirstAppUid || callers_.contains(name))
-        continue;
-      wanted.emplace_back(name, info.uid);
-    }
-  }
-
-  std::size_t stat_missed = 0;
-  for (const auto &[name, uid] : wanted) {
-    auto dir = code_dirs_.find(name);
-    if (dir == code_dirs_.end() && packages_) {
-      /* Not a caller: its directory comes straight from the package database.
-       */
-      if (const auto own = packages_->code_dir_of(name)) {
-        code_dirs_.insert_or_assign(name, *own);
-        dir = code_dirs_.find(name);
-      }
-    }
-    if (dir == code_dirs_.end())
-      continue;
-    /*
-     * The file a child opens first is its own base.apk, and that is the inode
-     * whose open the kernel replaces, so the path to it is what goes up. A
-     * system app's apk is under /system, an installed one's under /data; both
-     * are files with an inode, and which partition it is on no longer matters.
-     */
-    /* packages.xml also carries a direct Foo.apk path for system packages.
-     * Such a path must not become Foo.apk/base.apk. And many system apps name
-     * the file after the directory instead of base.apk
-     * (Settings/Settings.apk) -- the shipped base.apk-only fallback left
-     * every one of them unregistered. */
-    std::error_code ec;
-    auto apk = dir->second;
-    if (!std::filesystem::is_regular_file(apk, ec)) {
-      const auto base = apk / "base.apk";
-      /* Append, not replace_extension: directory names carry dots
-       * (com.xiaomi.macro), and replace_extension would cut the last one. */
-      const auto named = apk / (apk.filename().string() + ".apk");
-      if (std::filesystem::is_regular_file(base, ec))
-        apk = base;
-      else if (std::filesystem::is_regular_file(named, ec))
-        apk = named;
-      else
-        apk = apk_in(apk);
-    }
-    /* A directory that still resolves to no apk -- split-only code paths,
-     * and directories that vanished between the database read and now. The
-     * path to a DIRECTORY is what stat() would happily accept, and the
-     * kernel's sweep refuses to arm a directory inode, so a directory entry
-     * here is a guaranteed "could not arm" per sweep: skip it with the
-     * rest. */
-    if (!std::filesystem::is_regular_file(apk, ec)) {
-      ++stat_missed;
-      continue;
-    }
-    if (!seen.insert(apk.string()).second)
-      continue;
-    struct stat info{};
-    if (::stat(apk.c_str(), &info) != 0) {
-      /* Not fatal for the batch, but silent would mean an identity that never
-       * comes back: say it, so a missing registration can be explained. */
-      ++stat_missed;
-      continue;
-    }
-    if (entries.size() >= kApkLimit)
-      break;
-    entries.push_back(ApkEntry{.path = apk.string(),
-                               .uid = uid,
-                               .dev = static_cast<std::uint32_t>(info.st_dev),
-                               .ino = static_cast<std::uint64_t>(info.st_ino)});
-  }
-  if (stat_missed != 0)
-    Log::warn("{} apk file(s) could not be stat'ed; they stay unregistered "
-              "until a later sync re-reads them",
-              stat_missed);
-
-  const auto id_of = [](const ApkEntry &entry) {
-    return ApkId{entry.dev, entry.ino};
-  };
-  std::map<ApkId, ApkEntry> desired;
-  for (const auto &entry : entries)
-    desired.try_emplace(id_of(entry), entry);
-
-  bool recovering = false;
-  std::vector<ApkEntry> drops;
-  for (auto &[id, old] : published_) {
-    recovering |= old.phase == ApkPhase::Adding;
-    const auto want = desired.find(id);
-    if (old.phase == ApkPhase::Dropping || want == desired.end() ||
-        want->second.uid != old.entry.uid) {
-      auto entry = old.entry;
-      entry.action = 1;
-      drops.push_back(std::move(entry));
-      old.phase = ApkPhase::Dropping;
-    }
-  }
-  /* Drops and adds are separate batches. A valid drop cannot fail per entry;
-   * its ACK confirms absence. If the reply is lost, repeat only drops before
-   * any add: replaying a mixed batch could park its own newly installed UID. */
-  if (!drops.empty()) {
-    if (!netlink_.push_apks(drops)) {
-      watcher_.arm_retry();
-      return false;
-    }
-    for (const auto &entry : drops)
-      published_.erase(id_of(entry));
-  }
-
-  std::vector<ApkEntry> adds;
-  for (const auto &[id, entry] : desired) {
-    const auto have = published_.find(id);
-    if (have == published_.end() || have->second.phase == ApkPhase::Adding)
-      adds.push_back(entry);
-  }
-  Log::info("registered {} app apk(s), {} change(s) to send", desired.size(),
-            drops.size() + adds.size());
-  if (drops.empty() && adds.empty())
-    return true;
-
-  enum class AddResult { Complete, Failed, Unreachable };
-  const auto add = [&](std::span<const ApkEntry> batch) {
-    /* Record possible effects before sending, including a commit whose ACK
-     * is lost. A desired-set rollback must still retire these identities. */
-    for (const auto &entry : batch)
-      published_.insert_or_assign(id_of(entry),
-                                  PublishedApk{entry, ApkPhase::Adding});
-    if (!netlink_.push_apks(batch))
-      /* A refusal means the kernel is there and said no -- later entries in
-       * the recovering loop still get their own attempt. Calling it
-       * unreachable would starve everything behind the first refusal. */
-      return netlink_.refused() ? AddResult::Failed : AddResult::Unreachable;
-    const auto st = netlink_.status();
-    if (!st || st->apk_offered != batch.size())
-      return AddResult::Unreachable;
-    if (st->apk_failed)
-      return AddResult::Failed;
-    for (const auto &entry : batch)
-      published_.at(id_of(entry)).phase = ApkPhase::Confirmed;
-    return AddResult::Complete;
-  };
-
-  bool complete = true;
-  bool reachable = true;
-  if (recovering) {
-    /* A failed batch says nothing about which additions succeeded. Re-adds
-     * are idempotent after their drop barrier; confirm them individually so
-     * one bad inode does not keep every successful entry in the retry set. */
-    for (const auto &entry : adds) {
-      const auto result = add(std::span<const ApkEntry>(&entry, 1));
-      if (result != AddResult::Complete)
-        complete = false;
-      if (result == AddResult::Unreachable) {
-        reachable = false;
-        break;
-      }
-    }
-  } else if (!adds.empty()) {
-    const auto result = add(adds);
-    complete = result == AddResult::Complete;
-    reachable = result != AddResult::Unreachable;
-  }
-  if (!complete)
+  const auto entries =
+      collect_apks(packages_ ? &*packages_ : nullptr, callers_, code_dirs_);
+  const auto result = apk_publisher_.publish(entries, netlink_);
+  if (!result.complete)
     watcher_.arm_retry();
-  /* the apk side moved, so the line a user reads has to move with it */
-  if (reachable) {
-    auto line = status_line(netlink_, pushed_.size());
-    if (!complete)
-      line += ", apk retry pending";
-    report_status(line);
-  } else {
+  switch (result.display) {
+  case ApkDisplay::Unchanged:
+    break;
+  case ApkDisplay::Refresh:
+    report_status(status_line(netlink_, pushed_.size()));
+    break;
+  case ApkDisplay::Pending:
+    report_status(status_line(netlink_, pushed_.size()) +
+                  ", apk retry pending");
+    break;
+  case ApkDisplay::Unreachable:
     report_status("kernel unreachable, apk update pending");
+    break;
   }
-  return complete;
+  return result.complete;
 }
 
 void Syncer::handle_packages(const std::vector<std::string> &dirs) {
