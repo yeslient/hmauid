@@ -229,15 +229,15 @@ jobs:
           set -euo pipefail
           UG_KBUILD_JOBS="$(nproc)" bash scripts/build-kmi.sh \
             android14-6.1 clang-r487747c \
-            "$RUNNER_TEMP/stage/debug-6.1" out/debug-6.1.ko 1
+            "$RUNNER_TEMP/stage/debug-6.1" out/debug/android14-6.1_arm64_tosya.ko 1
           NM=/opt/ddk/clang/clang-r487747c/bin/llvm-nm \
-            bash scripts/check-undefined.sh out/debug-6.1.ko
-          /opt/ddk/clang/clang-r487747c/bin/llvm-strings out/debug-6.1.ko > out/debug-strings.txt
+            bash scripts/check-undefined.sh out/debug/android14-6.1_arm64_tosya.ko
+          /opt/ddk/clang/clang-r487747c/bin/llvm-strings out/debug/android14-6.1_arm64_tosya.ko > out/debug-strings.txt
           grep -qF 'compiled in, they never turn off' out/debug-strings.txt
       - uses: actions/upload-artifact@v4
         with:
           name: tosya-diagnostic-6.1
-          path: out/debug-6.1.ko
+          path: out/debug/android14-6.1_arm64_tosya.ko
           if-no-files-found: error
 
   isotest-apk:

@@ -49,6 +49,10 @@ void tosya_debug_init(bool on)
 
 static int __init tosya_init(void)
 {
+	/* Declarations stay here: the older KMIs build with
+	 * -Werror=declaration-after-statement. */
+	int hooks;
+
 	if (policy_init())
 		return -ENOMEM;
 
@@ -71,11 +75,10 @@ static int __init tosya_init(void)
 	 * this point. Individual unsupported tiers report their own status. The
 	 * module takes its own name off the list below, so this line is the one
 	 * place a blind load is still visible: zero tiers says so out loud. */
-	int hooks = hooks_install();
+	hooks = hooks_install();
 	if (hooks == 0)
 		pr_err("tosya: no hook tier installed; the module is up but blind\n");
 	pr_info("tosya: ready (%d hook tier(s))\n", hooks);
-
 	/*
 	 * Take the module's own name back off the list.
 	 *
