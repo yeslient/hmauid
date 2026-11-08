@@ -156,9 +156,14 @@ bool Rules::in_list(const nlohmann::json &array, std::string_view name) {
   });
 }
 
-void Rules::log_summary(std::size_t callers, const Pairs &pairs) const {
-  Log::info("{} ({}): {} caller(s), {} pair(s)", path_.string(),
-            tool_name(tool_), callers, pairs.size());
+void Rules::log_summary(std::size_t callers, const Pairs &pairs,
+                        std::string_view note) const {
+  if (note.empty())
+    Log::info("{} ({}): {} caller(s), {} pair(s)", path_.string(),
+              tool_name(tool_), callers, pairs.size());
+  else
+    Log::info("{} ({}): {} caller(s), {} pair(s); {}", path_.string(),
+              tool_name(tool_), callers, pairs.size(), note);
 }
 
 std::unique_ptr<HmaRules> HmaRules::load(const std::filesystem::path &path) {
@@ -546,9 +551,14 @@ Pairs HmaOssRules::expand(const PackageDb &packages,
         Log::info("  {}: {} pair(s) ({})", caller, pairs.size() - before,
                   describe(entry, presets));
     }
-
+  /* detailLog defaults to false, and with the per-caller lines off a parse
+   * that did not happen shows up nowhere: the summary carries a standing
+   * note, so an empty-looking log can be explained. */
   dedupe(pairs);
-  log_summary(callers, pairs);
+  log_summary(callers, pairs,
+              detail_log ? std::string_view{}
+                         : "per-caller detail is off (detailLog=false in "
+                           "the HMA config)");
   report_presets(packages, presets, pairs);
   return pairs;
 }

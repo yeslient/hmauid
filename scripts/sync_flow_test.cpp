@@ -395,6 +395,9 @@ void detail_logging()
 		assert(log.contains("  com.example.caller: 1 pair(s) (") ==
 		       enabled);
 		assert(log.contains("1 caller(s), 1 pair(s)"));
+		/* With the detail lines off, the summary explains why -- every
+		 * sync, not once, so an empty-looking log stays explainable. */
+		assert(log.contains("per-caller detail is off") == !enabled);
 		assert(log.contains("registered 3 app apk(s),"));
 		assert(sync.sync_ok_ && retries == 0 &&
 		       sync.pushed_ == expected);

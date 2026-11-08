@@ -157,7 +157,8 @@ protected:
     }
   }
 
-  void log_summary(std::size_t callers, const Pairs &pairs) const;
+  void log_summary(std::size_t callers, const Pairs &pairs,
+                   std::string_view note = {}) const;
 
   nlohmann::json config_;
   std::filesystem::path path_;
