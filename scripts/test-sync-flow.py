@@ -11,7 +11,7 @@ import shlex
 import subprocess
 
 root = Path(__file__).resolve().parents[1]
-out = root / "build/tests/sync"
+out = Path(os.environ.get("TOSYA_SYNC_TEST_OUT", root / "build/tests/sync")).resolve()
 out.mkdir(parents=True, exist_ok=True)
 fixtures = out / "fixtures"
 fixtures.mkdir(exist_ok=True)
@@ -59,4 +59,4 @@ command = shlex.split(os.environ.get("CXX", "g++")) + [
 ] + shlex.split(os.environ.get("TOSYA_TEST_CXXFLAGS", ""))
 subprocess.run(command + sources + [str(root / "scripts/sync_flow_test.cpp"),
                "-Wl,--gc-sections", "-lz", "-o", str(out / "test")], check=True)
-subprocess.run([str(out / "test")], check=True)
+subprocess.run([str(out / "test")], check=True, timeout=60)

@@ -25,6 +25,7 @@ std::vector<std::string> displays;
 kaux_status current_status{};
 bool status_missing;
 unsigned retries;
+bool policy_accept = true, token_accept = true, names_accept = true;
 
 Config once_config()
 {
@@ -51,6 +52,7 @@ void reset()
 	current_status = {};
 	status_missing = false;
 	retries = 0;
+	policy_accept = token_accept = names_accept = true;
 }
 
 void trace(std::string_view scenario)
@@ -228,6 +230,116 @@ void orchestration()
 	assert(!policies.empty() && policies.back().empty());
 	trace("empty-config-clears-policy");
 }
+
+void failure_boundaries()
+{
+	const auto config = R"({"configVersion":4,"scope":{
+"com.example.caller":{"extraAppList":["com.example.target"]}}})";
+	for (unsigned stream = 0; stream < 3; ++stream) {
+		reset();
+		package_xml();
+		write(root / "config.json", config);
+		Syncer sync{ once_config() };
+		policy_accept = stream != 0;
+		token_accept = stream != 1;
+		names_accept = stream != 2;
+		sync.sync_now();
+		assert(!sync.sync_ok_ && batches.empty() && retries == 1);
+		assert(sync.policy_pushed_ == (stream != 0));
+		assert(!sync.names_pushed_ && !sync.pushed_token_);
+		if (stream == 0)
+			assert((events ==
+				std::vector<std::string>{ "policy" }));
+		else if (stream == 1)
+			assert((events == std::vector<std::string>{ "policy",
+								    "status",
+								    "token" }));
+		else
+			assert((events ==
+				std::vector<std::string>{ "policy", "status",
+							  "token", "names" }));
+		trace("failed-stream-" + std::to_string(stream));
+		reset();
+		sync.sync_now();
+		assert(sync.sync_ok_ && sync.names_pushed_ &&
+		       sync.pushed_token_);
+		assert(policies.size() == (stream == 0 ? 1u : 0u));
+		assert(names.size() == 1 && !batches.empty());
+	}
+
+	reset();
+	Syncer sync{ once_config() };
+	sync.sync_now();
+	const auto confirmed = sync.pushed_;
+	reset();
+	fs::remove(root / "config.json");
+	sync.sync_now();
+	assert(!sync.sync_ok_ && sync.pushed_ == confirmed && retries == 1);
+	assert(policies.empty() && batches.empty());
+	trace("missing-config-keeps-policy");
+	write(root / "config.json", config);
+	reset();
+	write(root / "packages.xml", "<");
+	sync.sync_now();
+	assert(!sync.sync_ok_ && sync.pushed_ == confirmed && retries == 1);
+	assert(policies.empty() && batches.empty());
+	trace("torn-package-snapshot-keeps-policy");
+	package_xml();
+	reset();
+	fs::rename(root / "users", root / "users-offline");
+	sync.sync_now();
+	fs::rename(root / "users-offline", root / "users");
+	assert(!sync.sync_ok_ && sync.pushed_ == confirmed && retries == 1);
+	assert(policies.empty() && batches.empty());
+	trace("missing-user-list-keeps-policy");
+
+	reset();
+	fs::remove(root / "state/token");
+	fs::create_directory(root / "state/token");
+	Syncer missing_token{ once_config() };
+	missing_token.sync_now();
+	// Preserve current semantics: token failure schedules a retry but permits APK work.
+	assert(retries == 1 && names.empty() && !batches.empty());
+	assert(missing_token.sync_ok_ && !missing_token.names_pushed_);
+	trace("missing-token-still-processes-apks");
+	fs::remove(root / "state/token");
+	write(root / "state/token", std::string(16, 't'));
+
+	reset();
+	write(root / "config.json", R"({"configVersion":4,"scope":{}})");
+	Syncer empty{ once_config() };
+	empty.sync_now();
+	assert(empty.sync_ok_ && policies.size() == 1 &&
+	       policies.front().empty());
+	trace("new-daemon-publishes-empty-policy");
+}
+
+void early_install_event()
+{
+	reset();
+	package_xml();
+	write(root / "config.json", R"({"configVersion":4,"scope":{
+"com.example.caller":{"extraAppList":["com.example.target"]}}})");
+	Syncer sync{ once_config() };
+	sync.sync_now();
+	const auto hint = root / "app/~~early/com.example.caller-new";
+	write(hint / "base.apk");
+	reset();
+	sync.handle_packages({ "~~early" });
+	assert(sync.code_dirs_.at("com.example.caller") == hint);
+	assert(batches.size() == 2 && batches[0][0].action == 1 &&
+	       batches[1][0].path == (hint / "base.apk").string());
+	sync.sync_now();
+	assert(sync.code_dirs_.at("com.example.caller") == hint);
+	trace("precommit-install-event-retains-path");
+
+	reset();
+	Syncer throttled{ Config{} };
+	throttled.last_pass_start_ = std::chrono::steady_clock::now();
+	throttled.sync_now();
+	assert(events.empty() && retries == 1);
+	trace("throttled-pass-arms-retry");
+}
 } // namespace
 
 namespace tosya
@@ -236,18 +348,18 @@ bool NetlinkClient::push(std::span<const Pair> value)
 {
 	events.emplace_back("policy");
 	policies.emplace_back(value.begin(), value.end());
-	return true;
+	return policy_accept;
 }
 bool NetlinkClient::push_names(std::span<const HiddenName> value)
 {
 	events.emplace_back("names");
 	names.emplace_back(value.begin(), value.end());
-	return true;
+	return names_accept;
 }
 bool NetlinkClient::push_token(std::span<const std::uint32_t, 4>)
 {
 	events.emplace_back("token");
-	return true;
+	return token_accept;
 }
 bool NetlinkClient::refresh()
 {
@@ -299,5 +411,7 @@ int main()
 	apk_state_machine();
 	apk_paths();
 	orchestration();
+	failure_boundaries();
+	early_install_event();
 	std::cout << "sync flow: passed\n";
 }

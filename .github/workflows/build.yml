@@ -192,6 +192,14 @@ jobs:
           echo "${out}"
           echo "${out}" | grep -q '^usage:' || { echo 'no usage line'; exit 1; }
           [ "${rc:-0}" -eq 2 ] || { echo "exit code ${rc:-0}, expected 2"; exit 1; }
+      - name: Userspace rules and publication regressions
+        run: CXX=g++-14 bash scripts/run-userspace-tests.sh
+      - name: Sync flow under ASan and UBSan
+        env:
+          CXX: g++-14
+          TOSYA_TEST_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          TOSYA_SYNC_TEST_OUT: build/tests/sync-sanitized
+        run: python3 scripts/test-sync-flow.py
 
   host-test:
     name: host test suite
@@ -205,6 +213,32 @@ jobs:
       # months inside it without anyone noticing.
       - name: Run the host suite
         run: bash scripts/run-hosttest.sh
+      - name: Production netlink handlers
+        run: python3 scripts/test-netlink-flow.py
+
+  diagnostics:
+    name: permanent diagnostics (android14-6.1)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ylarod/ddk:android14-6.1-20260828
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and check the diagnostic module
+        run: |
+          set -euo pipefail
+          UG_KBUILD_JOBS="$(nproc)" bash scripts/build-kmi.sh \
+            android14-6.1 clang-r487747c \
+            "$RUNNER_TEMP/stage/debug-6.1" out/debug-6.1.ko 1
+          NM=/opt/ddk/clang/clang-r487747c/bin/llvm-nm \
+            bash scripts/check-undefined.sh out/debug-6.1.ko
+          /opt/ddk/clang/clang-r487747c/bin/llvm-strings out/debug-6.1.ko > out/debug-strings.txt
+          grep -qF 'compiled in, they never turn off' out/debug-strings.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tosya-diagnostic-6.1
+          path: out/debug-6.1.ko
+          if-no-files-found: error
 
   isotest-apk:
     name: isotest apk builds
@@ -308,7 +342,7 @@ jobs:
   package:
     name: module zip
     runs-on: ubuntu-latest
-    needs: [lkm, host-build]
+    needs: [lkm, host-build, host-test, diagnostics]
     # always(), because lkm carries one too: a job that runs under always() does
     # not report "success", so the implicit success check an if without always()
     # brings with it would skip this job on every single run. Matrix legs use
@@ -321,6 +355,8 @@ jobs:
         env:
           LKM_RESULT: ${{ needs.lkm.result }}
           HOST_RESULT: ${{ needs.host-build.result }}
+          TEST_RESULT: ${{ needs.host-test.result }}
+          DEBUG_RESULT: ${{ needs.diagnostics.result }}
         run: |
           set -euo pipefail
           if [ "$LKM_RESULT" != "success" ]; then
@@ -329,6 +365,10 @@ jobs:
           fi
           if [ "$HOST_RESULT" != "success" ]; then
             echo "host build finished as '$HOST_RESULT'; the tool is not linkable"
+            exit 1
+          fi
+          if [ "$TEST_RESULT" != "success" ] || [ "$DEBUG_RESULT" != "success" ]; then
+            echo "host tests='$TEST_RESULT', diagnostics='$DEBUG_RESULT'; candidate verification incomplete"
             exit 1
           fi
       - uses: actions/checkout@v7
@@ -387,9 +427,16 @@ jobs:
               echo "$f missing from the module zip"; exit 1; }
             unzip -p "$zip" "$f" | sh -n
           done
+      - name: Record candidate verification and checksum
+        run: |
+          set -euo pipefail
+          printf 'commit=%s\nNDK=r27c\nDDK=20260828\nKMI=8 release + android14-6.1 diagnostics\nhost-build=passed\nuserspace-tests=passed\nhost-tests=passed\ndevice-acceptance=pending\n' \
+            "$GITHUB_SHA" > build/dist/verification.txt
+          cd build/dist
+          sha256sum *.zip > SHA256SUMS
       - name: Upload the module
         uses: actions/upload-artifact@v4
         with:
           name: tosya-module-zip
-          path: build/dist/*.zip
+          path: build/dist/*
           if-no-files-found: error

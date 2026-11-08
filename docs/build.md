@@ -61,6 +61,49 @@ Prebuilt mode packages the files present in `build/ko`; keep that directory limi
 to the intended candidate. `UG_DEBUG=ON` enables permanent kernel diagnostics.
 Normal packages leave it off; the `debug=1` module parameter enables them for 60 seconds.
 
+## Host verification and candidate gates
+
+Use GCC 14 or newer for C++23 `<print>`, plus Clang, Python 3,
+`nlohmann-json3-dev` and `zlib1g-dev`:
+
+```sh
+CXX=g++-14 bash scripts/build-host.sh
+bash scripts/run-hosttest.sh
+CXX=g++-14 bash scripts/run-userspace-tests.sh
+python3 scripts/test-netlink-flow.py
+bash scripts/check-format.sh
+```
+
+`run-userspace-tests.sh` runs the real package parsers, rules, presets and source
+selection tests, then policy-plan and APK publication regressions. The sync-flow
+harness copies production sources into `build/tests/sync`: only Android file roots
+and private visibility are changed. It links a deterministic netlink boundary to
+exercise lost replies, refusals, recovery and publication order without a device.
+Run the same production flow under sanitizers with:
+
+```sh
+CXX=g++-14 TOSYA_TEST_CXXFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+  python3 scripts/test-sync-flow.py
+```
+
+`Syncer` owns input caches, scheduling, tokens and presentation. `policy_plan.cpp`
+computes desired rules/names/callers from loaded inputs; `apk_collector.cpp`
+resolves APK files; `apk_publisher.cpp` owns the uncertain publication ledger.
+The collector's 10000-file cap and the kernel's allocated-record cap are separate.
+
+The candidate ZIP job requires all eight ordinary KMI builds, the host build and
+userspace regressions, the host suite and a permanent-diagnostics 6.1 build. Its
+artifact includes the ZIP, `SHA256SUMS` and `verification.txt` with the source
+commit and the pending device-acceptance boundary. These gates run on the checked
+out CI commit; a local commit cannot be validated by dispatching an older remote
+ref. The tag-driven Telegram release path is separate from this candidate job.
+
+Device acceptance remains separate: install/reboot, verify policy and isolated
+process behavior, and inspect diagnostics on the matching diagnostic build. A
+permanent build logs `diagnostics on (compiled in, they never turn off)` when
+enabled; it must still produce diagnostics after 60 seconds. A host test or a
+string in a compiled module alone does not prove that device behavior.
+
 ## Loading
 
 Install the zip through KernelSU and reboot. `customize.sh` selects the matching

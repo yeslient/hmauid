@@ -365,10 +365,9 @@ void Syncer::sync_now(std::string_view why) {
     };
     const bool names_changed =
         !names_pushed_ || !std::ranges::equal(names, pushed_names_, same_name);
-    /* Nothing in this block may exit the function: the apk table at the end
-     * of the pass is not derived from the names, and leaving early froze it
-     * for every pass whose names happened to be unchanged -- an app installed
-     * after boot then never registered its apk. */
+    /* Unchanged names must still reach APK work: that table is independent
+     * of this set. A missing token schedules a retry and permits APK work;
+     * a failed token or names push stops this pass before it. */
     const auto token = installation_token();
     if (!token) {
       watcher_.arm_retry();
