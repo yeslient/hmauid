@@ -324,6 +324,11 @@ void Syncer::sync_now(std::string_view why) {
     watcher_.arm_retry();
     return;
   }
+  /* Over-limit is refused here on purpose -- an intentional change from the
+   * pre-split behavior: that path pushed every pair and let the kernel
+   * truncate to POLICY_MAX_PAIRS and publish the partial table, so a policy
+   * that had silently dropped rules still read as armed. Refusing keeps the
+   * previous policy whole, and the warning says why. */
   const auto plan =
       build_policy_plan(*opened->rules, opened->presets, *packages, *users);
   if (!plan) {

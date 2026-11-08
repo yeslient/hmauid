@@ -68,9 +68,13 @@ static int __init tosya_init(void)
 	tosya_dir_init();
 	/* An inline tier may pin this module and publish a kernel entry below.
 	 * Module-loader failure frees even pinned modules: no error return after
-	 * this point. Individual unsupported tiers report their own status. */
-	hooks_install();
-	pr_info("tosya: initialization complete\n");
+	 * this point. Individual unsupported tiers report their own status. The
+	 * module takes its own name off the list below, so this line is the one
+	 * place a blind load is still visible: zero tiers says so out loud. */
+	int hooks = hooks_install();
+	if (hooks == 0)
+		pr_err("tosya: no hook tier installed; the module is up but blind\n");
+	pr_info("tosya: ready (%d hook tier(s))\n", hooks);
 
 	/*
 	 * Take the module's own name back off the list.

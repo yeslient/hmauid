@@ -128,8 +128,12 @@ std::vector<ApkEntry> collect_apks(
       ++stat_missed;
       continue;
     }
-    if (entries.size() >= kApkCollectionLimit)
+    if (entries.size() >= kApkCollectionLimit) {
+      Log::warn("{} apk entries collected; the {} limit left the rest "
+                "unregistered",
+                entries.size(), kApkCollectionLimit);
       break;
+    }
     entries.push_back(ApkEntry{.path = apk.string(),
                                .uid = uid,
                                .dev = static_cast<std::uint32_t>(info.st_dev),
