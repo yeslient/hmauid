@@ -630,7 +630,7 @@ static void policy_publish(struct policy *np)
  * scratch by it and the fill pass populates by it -- a divergence here would
  * make the allocation and the contents disagree.
  */
-static bool policy_pair_kept(u32 caller, u32 target)
+static bool policy_pair_kept(u32 target)
 {
 	return target >= 10000; // never hide target 0 or system uids
 }
@@ -653,7 +653,7 @@ static u32 collect_pairs(const u32 *pairs, u32 npairs, struct apply_pair *tmp,
 		const u32 caller = pairs[2 * i];
 		const u32 target = pairs[2 * i + 1];
 
-		if (!policy_pair_kept(caller, target))
+		if (!policy_pair_kept(target))
 			continue;
 		if (caller == 0) // caller 0: hide from everyone
 			wild = 1;
@@ -814,7 +814,7 @@ out:
 	}
 
 	pr_info("tosya: injected %u pair(s), %u caller(s), %u line(s), %u mask word(s) in %u mask(s), probe %u, %s layout\n",
-		npairs, np->ncallers, np->nlines, np->nmask_words, l.nmasks,
+		np->npairs, np->ncallers, np->nlines, np->nmask_words, l.nmasks,
 		np->nprobe, np->mirror ? "uid-hash" : "own-hash");
 	return 0;
 }
