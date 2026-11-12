@@ -61,6 +61,18 @@ Prebuilt mode packages the files present in `build/ko`; keep that directory limi
 to the intended candidate. `UG_DEBUG=ON` enables permanent kernel diagnostics.
 Normal packages leave it off; the `debug=1` module parameter enables them for 60 seconds.
 
+A diagnostic build must not wear the production file name: `<kmi>_arm64_tosya.ko`
+is the exact name the module zip carries in `ko/`, and a diagnostic binary under
+that name is one careless copy away from being installed on a phone with
+diagnostics that never turn off. Name it for what it is
+(`tosya-diagnostic-android14-6.1.ko`) and tell the symbol check which tree it
+was built against, since the name no longer says it:
+
+```sh
+NM=llvm-nm bash scripts/check-undefined.sh --kmi android14-6.1 \
+  build/ko/tosya-diagnostic-android14-6.1.ko
+```
+
 ## Host verification and candidate gates
 
 Use GCC 14 or newer for C++23 `<print>`, plus Clang, Python 3,

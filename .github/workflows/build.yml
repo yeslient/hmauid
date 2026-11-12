@@ -227,17 +227,29 @@ jobs:
       - name: Build and check the diagnostic module
         run: |
           set -euo pipefail
+          # The name says what the binary is, and the KMI is passed to the symbol
+          # check explicitly. The diagnostic ko used to be built as
+          # <kmi>_arm64_tosya.ko -- the exact file name it would carry in ko/
+          # inside the module zip -- so an artifact named "diagnostic" held a
+          # binary indistinguishable from the production module by path alone.
+          DEBUG_KO=out/debug/tosya-diagnostic-android14-6.1.ko
+          case "$(basename "$DEBUG_KO")" in
+            *_arm64_tosya.ko)
+              echo "the diagnostic ko must not carry the production file name" >&2
+              exit 1
+              ;;
+          esac
           UG_KBUILD_JOBS="$(nproc)" bash scripts/build-kmi.sh \
             android14-6.1 clang-r487747c \
-            "$RUNNER_TEMP/stage/debug-6.1" out/debug/android14-6.1_arm64_tosya.ko 1
+            "$RUNNER_TEMP/stage/debug-6.1" "$DEBUG_KO" 1
           NM=/opt/ddk/clang/clang-r487747c/bin/llvm-nm \
-            bash scripts/check-undefined.sh out/debug/android14-6.1_arm64_tosya.ko
-          /opt/ddk/clang/clang-r487747c/bin/llvm-strings out/debug/android14-6.1_arm64_tosya.ko > out/debug-strings.txt
+            bash scripts/check-undefined.sh --kmi android14-6.1 "$DEBUG_KO"
+          /opt/ddk/clang/clang-r487747c/bin/llvm-strings "$DEBUG_KO" > out/debug-strings.txt
           grep -qF 'compiled in, they never turn off' out/debug-strings.txt
       - uses: actions/upload-artifact@v4
         with:
           name: tosya-diagnostic-6.1
-          path: out/debug/android14-6.1_arm64_tosya.ko
+          path: out/debug/tosya-diagnostic-android14-6.1.ko
           if-no-files-found: error
 
   isotest-apk:
