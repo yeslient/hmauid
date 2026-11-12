@@ -136,6 +136,9 @@ constexpr std::string_view kAppRoot = "/data/app";
   if (!out)
     return std::nullopt;
   std::filesystem::permissions(file, std::filesystem::perms::owner_read, ec);
+  if (ec)
+    Log::warn("cannot restrict {} to owner-read: {}", file.string(),
+              ec.message());
   return words;
 }
 
@@ -191,8 +194,10 @@ const PackageDb *Syncer::packages() {
     return &*packages_;
 
   auto db = PackageDb::load(std::string{kPackagesXml});
-  if (!db)
+  if (!db) {
+    Log::warn("cannot parse {} (will retry on the next event)", kPackagesXml);
     return nullptr;
+  }
   Log::info("read {} ({} package(s))", kPackagesXml, db->by_name().size());
   /* Directory events may have identified a caller's replacement APK before
    * this database commit. Only a new, readable snapshot supersedes the hint. */

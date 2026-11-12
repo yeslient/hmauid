@@ -39,7 +39,7 @@ namespace {
  * '?' marks a name the cache did not have. */
 [[nodiscard]] std::string preset_label(std::string_view preset,
                                        const Presets &presets) {
-  const auto dynamic = presets.find(std::string{preset});
+  const auto dynamic = presets.find(preset);
   const std::size_t statics = static_preset_size(preset);
   const std::size_t total =
       (dynamic == presets.end() ? 0 : dynamic->second.size()) + statics;
@@ -299,12 +299,12 @@ bool HmaOssRules::hides_target(std::string_view caller,
         if (!name.is_string())
           continue;
         const auto &preset_name = name.get_ref<const std::string &>();
-        const auto preset = presets.find(std::string{preset_name});
+        const auto preset = presets.find(preset_name);
         /* HMA-OSS reads a preset as exactPackageNames U packageNames, and its
          * cache carries only the second half: the written-in half is checked
          * here too, so a cache that is missing or trimmed hides the same set
          * the app does. */
-        const auto scanned = facts_.scanned.find(std::string{preset_name});
+        const auto scanned = facts_.scanned.find(preset_name);
         const bool in_preset =
             (preset != presets.end() && preset->second.contains(target)) ||
             (scanned != facts_.scanned.end() &&
