@@ -1,11 +1,15 @@
 #!/system/bin/sh
 # Load the module if post-fs-data did not, then start sync-tool: it watches HMA's config,
 # evaluates it and pushes the resulting policy over netlink, forever.
+# Everything this script and sync-tool create is born private: the log names
+# every caller, target and preset, and the token is a key. umask makes the
+# default owner-only so a missed chmod cannot widen it; the chmods below are
+# the backstop for what already exists. sync-tool inherits this umask, so the
+# files it writes (token, mask keys) come out owner-only too.
+umask 077
 MODDIR=${0%/*}
 LOG="$MODDIR/state/sync.log"
 mkdir -p "$MODDIR/state"
-# The log names every caller, target and preset; keep both root-only instead of
-# whatever the filesystem hands a fresh directory.
 chmod 700 "$MODDIR/state"
 
 # A previous sync-tool may still be alive: an update that did not reboot, or a
@@ -45,6 +49,12 @@ touch "$LOG" && chmod 600 "$LOG"
 echo "[svc] orphans left: $orphans" >>"$LOG"
 
 . "$MODDIR/load.sh"
-tosya_load "$MODDIR" >>"$LOG" 2>&1
+# A load that failed leaves nothing to talk to: sync-tool would spin on the
+# 10 s retry, growing the log with a full config read every round, looking
+# alive while doing nothing. Say so and stop.
+if ! tosya_load "$MODDIR" >>"$LOG" 2>&1; then
+  echo "[svc] module not loaded; sync-tool not started" >>"$LOG"
+  exit 0
+fi
 
 [ -x "$MODDIR/sync-tool" ] && "$MODDIR/sync-tool" >>"$LOG" 2>&1 &
