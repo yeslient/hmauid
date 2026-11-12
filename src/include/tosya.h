@@ -98,6 +98,8 @@ static inline bool tosya_package_name_ok(const u8 *name, u32 len)
 // app uids: 10000 + appid + user * 100000
 #define POLICY_APP_ID_MIN 10000u
 #define POLICY_APP_ID_SPAN 10000u
+// one user's worth of uid space: uid = user * this + app id
+#define TOSYA_UID_PER_USER 100000u
 // slot flag: "hide from any caller"
 #define POLICY_WILD_FLAG (1u << 15)
 
@@ -260,6 +262,20 @@ extern struct policy *g_pol __rcu;
 
 u32 policy_lookup_slow(uid_t target, u32 app);
 void policy_tagless_note(void);
+
+/* The app id a uid folds to, or false when the uid is not an app id of some
+ * user: system uids and the ranges Android reserves answer "no". The policy's
+ * caller fold and the dir table's caller fold both go through this, so the
+ * span cannot drift between them. */
+static inline bool tosya_app_id_of(u32 uid, u32 *app)
+{
+	u32 a = uid % TOSYA_UID_PER_USER;
+
+	if (a < TOSYA_APP_MIN || a >= TOSYA_APP_MIN + TOSYA_APP_SPAN)
+		return false;
+	*app = a - TOSYA_APP_MIN;
+	return true;
+}
 
 // App id to hider id, shared by both halves so there is one implementation of it.
 static __always_inline u32 policy_cid_hot(const struct policy_hot *hot, u32 app)

@@ -630,9 +630,15 @@ static void policy_publish(struct policy *np)
  * scratch by it and the fill pass populates by it -- a divergence here would
  * make the allocation and the contents disagree.
  */
+// The raw uid floor of a hideable target: the first app uid of user 0. A
+// multi-user system uid passes this too, but the pair stream never carries
+// one -- the userspace half filters its targets by the same raw floor
+// (kFirstAppUid).
+#define POLICY_TARGET_FLOOR 10000u
+
 static bool policy_pair_kept(u32 target)
 {
-	return target >= 10000; // never hide target 0 or system uids
+	return target >= POLICY_TARGET_FLOOR;
 }
 
 /*
@@ -742,7 +748,11 @@ int policy_apply(const u32 *pairs, u32 npairs)
 		}
 	}
 
+	/* Publish first, so the self-check answers through the snapshot a
+	 * caller would see. */
 	if (ok) {
+		u32 checked = 0, hits = 0;
+
 		np->tgt = l.tgt;
 		np->mask_pool = l.masks;
 		np->cid = l.cid;
@@ -757,19 +767,11 @@ int policy_apply(const u32 *pairs, u32 npairs)
 		l.tgt = NULL;
 		l.masks = NULL;
 		l.cid = NULL;
-	}
 
-	/* Publish first, so the self-check answers through the snapshot a caller
-   * would see. */
-	if (ok) {
 		policy_publish(np);
 		/* The find_user hook's gate arms with the first non-empty
 		 * snapshot and stays armed while rules are live. */
 		static_branch_enable(&tosya_active_key);
-	}
-
-	if (ok) {
-		u32 checked = 0, hits = 0;
 
 		// answer every configured pair from the table that is now live
 		for (i = 0; i < n; i++) {
@@ -780,7 +782,8 @@ int policy_apply(const u32 *pairs, u32 npairs)
 			 * purpose, and the userspace half never emits such a pair: counting it here
 			 * would report a policy that is in fact complete as broken.
 			 */
-			if (tmp[i].caller % 100000u == tmp[i].target % 100000u)
+			if (tmp[i].caller % TOSYA_UID_PER_USER ==
+			    tmp[i].target % TOSYA_UID_PER_USER)
 				continue;
 			checked++;
 			if (policy_lookup_as((uid_t)tmp[i].caller,
@@ -1090,14 +1093,15 @@ void noinline policy_tagless_note(void)
  */
 u32 policy_lookup_as(uid_t caller, uid_t target)
 {
-	const u32 off = ((u32)caller % 100000u);
+	u32 app;
 
-	if (off <= 1000u || (u32)caller == (u32)target)
+	if ((u32)caller == (u32)target)
 		return 0;
-	if (off < POLICY_APP_ID_MIN ||
-	    off >= POLICY_APP_ID_MIN + POLICY_APP_ID_SPAN)
+	/* System uids and everything outside the app id span answer 0; the
+	 * <= 1000 fold the older form carried is inside that. */
+	if (!tosya_app_id_of((u32)caller, &app))
 		return 0;
-	return policy_lookup_slow(target, off - POLICY_APP_ID_MIN);
+	return policy_lookup_slow(target, app);
 }
 
 static void policy_reset(void)

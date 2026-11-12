@@ -223,10 +223,9 @@ static int dir_caller_app_of(u32 caller, u32 *app)
 		*app = TOSYA_APP_SPAN;
 		return 0;
 	}
-	a = caller % 100000u;
-	if (a < TOSYA_APP_MIN || a >= TOSYA_APP_MIN + TOSYA_APP_SPAN)
+	if (!tosya_app_id_of(caller, &a))
 		return -EINVAL;
-	*app = a - TOSYA_APP_MIN;
+	*app = a;
 	return 0;
 }
 
@@ -1015,6 +1014,9 @@ static u32 dir_guard_count(void)
 
 #define DIR_PATH_MAX 160
 #define DIR_SCAN_MAX 64
+/* A user id is decimal; both the scan buffer's width and the actor's length
+ * check come from this one number, so they cannot drift apart again. */
+#define DIR_UID_DIGITS 10
 
 static DEFINE_MUTEX(g_dir_refresh_lock);
 
@@ -1045,7 +1047,7 @@ static int dir_register_path(const char *path)
 
 struct dir_scan {
 	struct dir_context ctx;
-	char name[DIR_SCAN_MAX][12];
+	char name[DIR_SCAN_MAX][DIR_UID_DIGITS + 1];
 	u32 n;
 };
 
@@ -1071,7 +1073,7 @@ static dir_scan_ret dir_scan_actor(struct dir_context *ctx, const char *name,
 	(void)pos;
 	(void)ino;
 	(void)type;
-	if (len <= 0 || len > 8 || s->n >= DIR_SCAN_MAX)
+	if (len <= 0 || len > DIR_UID_DIGITS || s->n >= DIR_SCAN_MAX)
 		return DIR_SCAN_MORE;
 	for (i = 0; i < len; i++)
 		if (name[i] < '0' || name[i] > '9')
