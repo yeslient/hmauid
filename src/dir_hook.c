@@ -92,8 +92,8 @@ struct dir_ent {
  * The published set. It is never written after it is handed over: a lookup
  * reads the pointer once, inside its own RCU read side, and then only touches
  * this object. A replacement is built on the side and published with one store;
- * the one it replaces is kept on a retired list rather than freed, because a
- * walk can still be using a pointer into its mask bytes.
+ * what becomes of the replaced set is the retired list's business (see
+ * g_dir_retired below).
  */
 struct dir_names {
 	u32 nent; // distinct names
@@ -460,9 +460,9 @@ static __attribute__((__noinline__)) u32 dir_hidden_probe(
  * and the entry's precomputed hash(M); the hook turns those into two csel
  * choices, and the length is never touched.
  *
- * The mask pointer is into the published set. Replaced sets are retained, not
- * freed, because nd->last may still point at their bytes when lookup_slow()
- * reads it after this function (and the hook) has returned.
+ * The mask pointer is into the published set, and a replaced set it still
+ * points into stays alive for this caller: the retained list is
+ * g_dir_retired's one job.
  */
 bool tosya_dir_walk_last(const struct qstr *last, const u8 **mask_bytes,
 			 u32 *mask_hash)
@@ -1102,7 +1102,15 @@ static void dir_scan_users(const char *root)
 	filp_close(f, NULL);
 
 	for (i = 0; i < s.n; i++) {
-		snprintf(path, sizeof(path), "%s/%s", root, s.name[i]);
+		const int n =
+			snprintf(path, sizeof(path), "%s/%s", root, s.name[i]);
+
+		if (n < 0 || (size_t)n >= sizeof(path)) {
+			pr_warn_once(
+				"tosya: %s: a user name did not fit the path buffer; skipped\n",
+				root);
+			continue;
+		}
 		dir_register_path(path);
 	}
 }
@@ -1113,15 +1121,30 @@ static void dir_scan_users(const char *root)
  * stays for the module's life, because the inode may still be pointing at the
  * copy and an unregistered parent cannot be given one back safely.
  */
+/* The counts the last refresh log line reported. The scan runs on every names
+ * stream end and every apply, so the line only carries news when it differs
+ * from what was last said; the status line below still tracks the live values.
+ */
+static u32 g_dir_last_log_names;
+static u32 g_dir_last_log_guards;
+
 void tosya_dir_refresh(void)
 {
+	u32 names, guards;
+
 	mutex_lock(&g_dir_refresh_lock);
 	dir_scan_users("/data/user");
 	dir_scan_users("/data/user_de");
 	mutex_unlock(&g_dir_refresh_lock);
-	tosya_status_set_hidden(dir_name_count(), dir_guard_count());
-	pr_info("tosya: %u directory(ies) protected, %u hidden name(s)\n",
-		dir_guard_count(), dir_name_count());
+	names = dir_name_count();
+	guards = dir_guard_count();
+	if (names != g_dir_last_log_names || guards != g_dir_last_log_guards) {
+		g_dir_last_log_names = names;
+		g_dir_last_log_guards = guards;
+		pr_info("tosya: %u directory(ies) protected, %u hidden name(s)\n",
+			guards, names);
+	}
+	tosya_status_set_hidden(names, guards);
 }
 
 void tosya_dir_names_reset(void)
