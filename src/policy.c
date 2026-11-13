@@ -58,6 +58,10 @@ struct policy {
 	 * that has no rules of its own, so the lookup cannot take its "no rules"
 	 * shortcut on a snapshot that carries one. */
 	u32 wild;
+	/* The release path: publishing queues the replaced snapshot here, and
+	 * the RCU callback frees it once no reader can still be inside. Last,
+	 * so no field a reader touches shares its cache line. */
+	struct rcu_head rcu;
 };
 
 /*
@@ -609,9 +613,15 @@ static void policy_release(struct policy *p)
 	kfree(p);
 }
 
+static void policy_free_rcu(struct rcu_head *head)
+{
+	policy_release(container_of(head, struct policy, rcu));
+}
+
 /*
  * Publish a snapshot: one store makes it visible, and the snapshot it replaced
- * is only freed once every query that could still be inside it has finished.
+ * is queued for the RCU callback. The netlink thread that applied a policy
+ * returns at once instead of waiting a full grace period on every install.
  */
 static void policy_publish(struct policy *np)
 {
@@ -621,8 +631,8 @@ static void policy_publish(struct policy *np)
 	np->hot.cid = np->cid;
 	np->hot.wild = np->wild;
 	old = xchg(&g_pol, np);
-	synchronize_rcu();
-	policy_release(old);
+	if (old != NULL)
+		call_rcu(&old->rcu, policy_free_rcu);
 }
 
 /*
@@ -1121,6 +1131,10 @@ void policy_free(void)
 	/* The gate disarms with the empty snapshot, matching every other path
 	 * that publishes one. */
 	static_branch_disable(&tosya_active_key);
+	/* Publishing now queues releases instead of waiting for them: every
+	 * callback queued above has to run while this module is still loaded,
+	 * because the callback is module text. */
+	rcu_barrier();
 	kfree(g_mhash);
 	kfree(g_scratch);
 	kfree(g_used);

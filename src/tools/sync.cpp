@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <sstream>
@@ -617,13 +618,19 @@ void Syncer::template_for(std::string_view caller, bool write) {
     return;
   }
 
+  // One uid-to-names index instead of a full package scan per pair: the
+  // final set is the same sorted, unique name list either way.
+  std::map<std::uint32_t, std::vector<std::string>> names_of_uid;
+  for (const auto &[name, info] : packages->by_name())
+    names_of_uid[info.uid].emplace_back(name);
+
   std::vector<std::string> names;
   for (const auto &pair : pairs) {
     if (pair.caller != *caller_uid)
       continue;
-    for (const auto &[name, info] : packages->by_name())
-      if (info.uid == pair.target && !std::ranges::contains(names, name))
-        names.emplace_back(name);
+    const auto it = names_of_uid.find(pair.target);
+    if (it != names_of_uid.end())
+      names.insert(names.end(), it->second.begin(), it->second.end());
   }
   std::ranges::sort(names);
   names.erase(std::unique(names.begin(), names.end()), names.end());

@@ -502,16 +502,19 @@ bool tosya_dir_walk_last(const struct qstr *last, const u8 **mask_bytes,
 
 static struct dir_guard *dir_guard_of(struct inode *dir)
 {
-	const u32 n = smp_load_acquire(&g_dir_guards);
-	u32 i;
+	const struct inode_operations *iop = READ_ONCE(dir->i_op);
 
-	for (i = 0; i < n; i++) {
-		struct dir_guard *g = READ_ONCE(g_dir_guard[i]);
-
-		if (g != NULL && g->inode == dir && dir->i_op == &g->iop)
-			return g;
-	}
-	return NULL;
+	/*
+	 * Every guard embeds its own copy of the operations, so the pointer the
+	 * inode carries is the record, not a reference into a table. The one
+	 * caller holds g_dir_sem for read, and the only path that frees a
+	 * record first hands every inode its original operations back under the
+	 * write lock (dir_guard_remove_all): inside a read side the pointer is
+	 * either the fallback or a live record's copy, never freed memory.
+	 */
+	if (iop == NULL || iop == READ_ONCE(g_dir_fallback))
+		return NULL;
+	return container_of(iop, struct dir_guard, iop);
 }
 
 /*

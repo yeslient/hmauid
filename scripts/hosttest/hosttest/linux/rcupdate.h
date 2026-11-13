@@ -63,4 +63,29 @@ struct rcu_head {
 	} while (0)
 #endif
 
+/*
+ * The callback model: one grace period, then the callback runs with no reader
+ * possible inside what it frees. That is the same order synchronize_rcu()
+ * models, so the callback runs synchronously here after the write side.
+ */
+#ifndef call_rcu
+#define call_rcu(head, fn)                          \
+	do {                                        \
+		pthread_rwlock_wrlock(&g_rcu_lock); \
+		pthread_rwlock_unlock(&g_rcu_lock); \
+		(head)->next = NULL;                \
+		(head)->func = (fn);                \
+		fn(head);                           \
+	} while (0)
+#endif
+
+/* Every call_rcu above has already run its callback: there is nothing to wait
+ * for, and the module teardown that calls this in the kernel waits for
+ * nothing here either. */
+#ifndef rcu_barrier
+#define rcu_barrier() \
+	do {          \
+	} while (0)
+#endif
+
 #endif

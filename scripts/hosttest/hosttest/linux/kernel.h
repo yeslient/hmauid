@@ -42,3 +42,10 @@ static inline u32 ilog2(u32 x)
 }
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
+/* Records carry their release bookkeeping inside themselves, the same way
+ * dir_guard embeds its inode_operations: the offset of the member recovers
+ * the owner. */
+#ifndef container_of
+#define container_of(ptr, type, member) \
+	((type *)((char *)(ptr) - offsetof(type, member)))
+#endif
