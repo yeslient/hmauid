@@ -22,6 +22,12 @@ python3 scripts/test-debug-build.py
 # until cmake makes one.
 mkdir -p build
 
+# Shared-header branch helpers: boundary refusal, B/BL encoding and round trips.
+branch=build/branch_encode_test
+cc -O1 -g -D_GNU_SOURCE -DTOSYA_HOST_TEST -I src/include -I scripts/hosttest/hosttest \
+  -o "$branch" scripts/branch_encode_test.c
+"$branch"
+
 out=build/policy_host_test
 cc -O1 -g -D_GNU_SOURCE -pthread -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$out" scripts/policy_host_test.c
 "$out"
@@ -80,7 +86,13 @@ TSAN_OPTIONS="suppressions=$PWD/scripts/tsan.supp" timeout 600 "$tsan" contend
 # Every host test again under the address and undefined sanitizers, not only the block written for
 # them: the same source built this way checks a different set of things, and a fault that only shows
 # in one of them is still a fault. The thread sanitizer is not repeated here, because none of these
-# three has a second thread to share anything with.
+# tests has a second thread to share anything with.
+asan=build/branch_encode_test_asan
+cc -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g -D_GNU_SOURCE \
+  -DTOSYA_HOST_TEST -I src/include -I scripts/hosttest/hosttest \
+  -o "$asan" scripts/branch_encode_test.c
+"$asan"
+
 asan=build/policy_host_test_asan
 cc -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g -D_GNU_SOURCE -pthread \
   -DTOSYA_HOST_TEST -I src -I scripts/hosttest/hosttest -I src/include -o "$asan" \

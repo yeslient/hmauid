@@ -1,7 +1,7 @@
-/* Host test for the branch encoder in tosya.h: this is the one piece that
- * must be exactly right, because a wrong encode writes garbage into kernel
- * text.
+/* Host test for the branch helpers in tosya.h. The runtime relocator's
+ * separate encoder is covered by inline_reloc_test.c.
  */
+#include <linux/kernel.h>
 #include "tosya.h"
 #include <stdio.h>
 
