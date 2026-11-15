@@ -13,28 +13,14 @@ mkdir -p "$MODDIR/state"
 chmod 700 "$MODDIR/state"
 
 # A previous sync-tool may still be alive: an update that did not reboot, or a
-# service.sh that ran twice this boot. Exact cmdline match, not pkill -f: -f
-# matches a substring ERE over the whole command line, so anything that merely
-# mentions this path would be hit too. The pid needs two expansions:
-# ${p#/proc/} leaves "<pid>/cmdline" and the suffix strip turns that into the
-# pid.
-for p in /proc/[0-9]*/cmdline; do
-  pid=${p#/proc/}
-  pid=${pid%/cmdline}
-  [ "$(tr '\0' ' ' < "$p" 2>/dev/null)" = "$MODDIR/sync-tool " ] &&
-    kill "$pid" 2>/dev/null
-done
+# service.sh that ran twice this boot.
+. "$MODDIR/lib.sh"
+tosya_kill_orphans
 sleep 0.2
 
-# Count what is left with the same exact match the kill used, and not with
-# `pgrep -fc`: that one matches the path as a substring of any command line,
-# so the very shell running this script (or an uninstaller mentioning the
-# path) would be counted as an orphan of its own crime.
-orphans=0
-for p in /proc/[0-9]*/cmdline; do
-  [ "$(tr '\0' ' ' < "$p" 2>/dev/null)" = "$MODDIR/sync-tool " ] &&
-    orphans=$((orphans + 1))
-done
+# Count what is left with the same exact match the kill used; the pgrep -fc
+# rationale lives in lib.sh next to the implementation.
+orphans=$(tosya_orphan_pids | grep -c .)
 
 # Rotate here and only here, between the kill and the start. The running
 # sync-tool holds the log fd, so an mv while it lives leaves it writing into

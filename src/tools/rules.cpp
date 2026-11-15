@@ -131,8 +131,17 @@ Rules::Rules(Tool tool, nlohmann::json config, std::filesystem::path path)
 const nlohmann::json *Rules::caller_entry(std::string_view caller) const {
   if (scope_ == nullptr)
     return nullptr;
+  /* One json find per caller, not per (caller, target) pair: expand() asks
+   * about the same caller once for every package it scans, and nlohmann has
+   * no transparent lookup to shortcut it. config_ never changes after load,
+   * so the entries stay valid for this object's life; keys are owned strings
+   * because probe callers pass views of short-lived strings. */
+  if (const auto hit = caller_cache_.find(caller); hit != caller_cache_.end())
+    return hit->second;
   const auto it = scope_->find(std::string{caller});
-  return it == scope_->end() ? nullptr : &*it;
+  const auto [pos, inserted] = caller_cache_.emplace(
+      std::string{caller}, it == scope_->end() ? nullptr : &*it);
+  return pos->second;
 }
 
 const nlohmann::json *Rules::template_entry(std::string_view name) const {

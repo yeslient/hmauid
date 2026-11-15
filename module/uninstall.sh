@@ -6,28 +6,14 @@
 # directory is the sync-tool service.sh started with &, so that is what this
 # script is for.
 MODDIR=${0%/*}
+. "$MODDIR/lib.sh"
 
-# Exact cmdline match, not pkill -f: -f matches a substring ERE over the whole
-# command line, so anything that merely mentions this path would be hit too.
-# The pid needs two expansions: ${p#/proc/} leaves "<pid>/cmdline" and the
-# suffix strip turns that into the pid.
 killed=0
-for p in /proc/[0-9]*/cmdline; do
-  pid=${p#/proc/}
-  pid=${pid%/cmdline}
-  if [ "$(tr '\0' ' ' < "$p" 2>/dev/null)" = "$MODDIR/sync-tool " ]; then
-    kill "$pid" 2>/dev/null && killed=$((killed + 1))
-  fi
+for pid in $(tosya_orphan_pids); do
+  kill "$pid" 2>/dev/null && killed=$((killed + 1))
 done
 sleep 0.2
-# Same exact match for the leftover count: pgrep -fc would count this very
-# uninstaller (its own command line mentions the path) as an orphan of its
-# own crime.
-orphans=0
-for p in /proc/[0-9]*/cmdline; do
-  [ "$(tr '\0' ' ' < "$p" 2>/dev/null)" = "$MODDIR/sync-tool " ] &&
-    orphans=$((orphans + 1))
-done
+orphans=$(tosya_orphan_pids | grep -c .)
 echo "[uninst] killed $killed, orphans left: $orphans"
 
 # The boot-scoped marker says "this boot loaded once"; leaving it behind would

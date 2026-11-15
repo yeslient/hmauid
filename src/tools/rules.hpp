@@ -160,6 +160,13 @@ protected:
   void log_summary(std::size_t callers, const Pairs &pairs,
                    std::string_view note = {}) const;
 
+  /* Per-caller entry cache: one json lookup per caller per object instead of
+   * one per (caller, target) pair. config_ is fixed after load, so cached
+   * entries never go stale; keys are owned strings, values point into
+   * config_. Single-threaded by construction, hence no lock. */
+  mutable std::map<std::string, const nlohmann::json *, std::less<>>
+      caller_cache_;
+
   nlohmann::json config_;
   std::filesystem::path path_;
   Tool tool_;
