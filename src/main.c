@@ -33,7 +33,7 @@ static void tosya_debug_off(struct work_struct *work)
 	}
 }
 
-void tosya_debug_init(bool on)
+static void tosya_debug_init(bool on)
 {
 	if (!on)
 		return;
