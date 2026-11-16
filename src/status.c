@@ -93,10 +93,6 @@ void tosya_status_note(int error)
 {
 	g_status.last_error = error;
 }
-void tosya_status_add_flags(unsigned int flags)
-{
-	g_status.flags |= flags;
-}
 
 void tosya_status_set_hooks_expected(unsigned int native, unsigned int compat)
 {

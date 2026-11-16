@@ -119,13 +119,6 @@ protected:
   [[nodiscard]] const nlohmann::json *
   caller_entry(std::string_view caller) const;
 
-public:
-  /* Probe-only: the entry as the tool itself sees it. */
-  [[nodiscard]] const nlohmann::json *
-  caller_entry_for_probe(std::string_view caller) const {
-    return caller_entry(caller);
-  }
-
 protected:
   /* The template of that name, or nullptr. */
   [[nodiscard]] const nlohmann::json *

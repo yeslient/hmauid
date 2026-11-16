@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lift the inode shadow block out of src/policy.c for the host test.
+"""Lift the inode shadow block out of src/inode_hook.c for the host test.
 
 The block is compiled for the kernel only (it needs inodes), so the host test
 needs it as a source of its own. It is extracted rather than copied on purpose: a
@@ -22,7 +22,7 @@ def main() -> int:
     root = pathlib.Path(__file__).resolve().parents[1]
     src = (root / "src" / "inode_hook.c").read_text()
     if BEGIN not in src or END not in src:
-        print("extract_shadow: the markers are gone from src/policy.c",
+        print("extract_shadow: the markers are gone from src/inode_hook.c",
               file=sys.stderr)
         return 1
     body = src.split(BEGIN, 1)[1].split("\n", 1)[1].split(END, 1)[0]

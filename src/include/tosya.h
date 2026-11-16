@@ -133,7 +133,6 @@ int policy_apply(const u32 *pairs, u32 npairs);
  */
 extern struct static_key_false tosya_debug_key;
 #define TOSYA_DEBUG_ON() static_branch_unlikely(&tosya_debug_key)
-void tosya_debug_init(bool on);
 /* The find_user hook's fast gate: armed while the policy carries rules. */
 extern struct static_key_false tosya_active_key;
 
@@ -330,7 +329,6 @@ static __always_inline u32 policy_query(uid_t target)
 	return policy_lookup_slow(target, app);
 }
 
-void tosya_status_add_flags(unsigned int flags);
 void tosya_status_set_hooks_expected(unsigned int native, unsigned int compat);
 void tosya_status_add_hooks(unsigned int native, unsigned int compat);
 void tosya_status_add_hooks_expected(unsigned int native, unsigned int compat);
