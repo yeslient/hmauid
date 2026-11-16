@@ -10,6 +10,11 @@ set -eu
 cd "$(dirname "$0")/.."
 
 fail=0
+# One formatter version everywhere: the DDK images bundle a different clang-format per
+# KMI, and the oldest ones reject scripts/.clang-format's InheritParentConfig. The CI
+# step pins the version and passes it here; unset means whatever the host has, which
+# is how the tree is formatted locally.
+clang_format=${CLANG_FORMAT:-clang-format}
 note() {
   echo "  $1"
   fail=1
@@ -39,7 +44,7 @@ tracked() {
 cxx_list=$(tracked '*.c' '*.cc' '*.cpp' '*.h' '*.hpp')
 mapfile -t cxx <<< "$cxx_list"
 echo "clang-format: ${#cxx[@]} files"
-if ! diff=$(clang-format --dry-run -Werror "${cxx[@]}" 2>&1); then
+if ! diff=$($clang_format --dry-run -Werror "${cxx[@]}" 2>&1); then
   printf '%s\n' "$diff" | sed 's/^/  /'
   note 'clang-format found differences'
 fi

@@ -118,13 +118,16 @@ jobs:
           fetch-depth: 0
           submodules: recursive
       - name: Check formatting
-        # Inside the image on purpose: it carries the clang-format this repository is written against,
-        # and a bare runner disagrees with it about the spacing written inside braces. The checkout
-        # is owned by a different user than the job: without safe.directory git refuses it, the
-        # enumeration comes back empty, and this step used to report OK on checking nothing.
+        # One clang-format version for every leg, pip-pinned to the one the tree is
+        # formatted with locally: the DDK images bundle a different clang-format per
+        # KMI, and the oldest ones reject scripts/.clang-format's InheritParentConfig.
+        # The checkout is owned by a different user than the job: without
+        # safe.directory git refuses it, the enumeration comes back empty, and this
+        # step used to report OK on checking nothing.
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          bash scripts/check-format.sh
+          pip3 install -q clang-format==21.1.8
+          CLANG_FORMAT="python3 -m clang_format" bash scripts/check-format.sh
       - name: Build
         run: |
           set -euo pipefail
