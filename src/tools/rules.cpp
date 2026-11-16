@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "rules.hpp"
 
+#include "reserved_names.hpp"
+
 #include "oss_presets.hpp"
 
 #include <algorithm>
@@ -82,23 +84,6 @@ constexpr std::array kHmaOssGmsCallers{
     std::string_view{"com.android.vending"},
     std::string_view{"com.google.android.gms"},
     std::string_view{"com.google.android.gsf"},
-};
-
-constexpr std::array kHmaOssReservedPackages{
-    std::string_view{"android"},
-    std::string_view{"android.media"},
-    std::string_view{"android.uid.system"},
-    std::string_view{"android.uid.shell"},
-    std::string_view{"android.uid.systemui"},
-    std::string_view{"com.android.permissioncontroller"},
-    std::string_view{"com.android.providers.downloads"},
-    std::string_view{"com.android.providers.downloads.ui"},
-    std::string_view{"com.android.providers.media"},
-    std::string_view{"com.android.providers.media.module"},
-    std::string_view{"com.android.providers.settings"},
-    std::string_view{"com.google.android.providers.media.module"},
-    std::string_view{"com.google.android.permissioncontroller"},
-    std::string_view{"com.miui.securitycenter"},
 };
 
 } // namespace
@@ -340,8 +325,8 @@ bool HmaOssRules::hides(std::string_view caller, std::string_view target,
                         bool target_is_system, const Presets &presets) const {
   if (caller == kHmaOssManager)
     return false;
-  if (std::ranges::contains(kHmaOssReservedPackages, caller) ||
-      std::ranges::contains(kHmaOssReservedPackages, target))
+  if (std::ranges::contains(kReservedPackages, caller) ||
+      std::ranges::contains(kReservedPackages, target))
     return false;
   /* A caller never hides itself. */
   if (caller == target)

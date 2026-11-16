@@ -16,28 +16,11 @@
 #include <vector>
 
 #include "packages.hpp"
+#include "reserved_names.hpp"
 #include "rules.hpp"
 
 namespace tosya {
 namespace {
-
-/* HMA-OSS never adds a package on its own reserved list to a preset. */
-constexpr std::array kReserved{
-    std::string_view{"android"},
-    std::string_view{"android.media"},
-    std::string_view{"android.uid.system"},
-    std::string_view{"android.uid.shell"},
-    std::string_view{"android.uid.systemui"},
-    std::string_view{"com.android.permissioncontroller"},
-    std::string_view{"com.android.providers.downloads"},
-    std::string_view{"com.android.providers.downloads.ui"},
-    std::string_view{"com.android.providers.media"},
-    std::string_view{"com.android.providers.media.module"},
-    std::string_view{"com.android.providers.settings"},
-    std::string_view{"com.google.android.providers.media.module"},
-    std::string_view{"com.google.android.permissioncontroller"},
-    std::string_view{"com.miui.securitycenter"},
-};
 
 [[nodiscard]] bool
 starts_with_any(std::string_view value,
@@ -208,7 +191,7 @@ Presets scan_presets(const ScanMap &apps,
   const bool want_shizuku = wanted.contains("shizuku_dhizuku");
 
   for (const auto &[name, info] : apps) {
-    if (std::ranges::contains(kReserved, name))
+    if (std::ranges::contains(kReservedPackages, name))
       continue;
     const bool detector =
         starts_with_any(name, {"me.garfieldhan."}) ||
