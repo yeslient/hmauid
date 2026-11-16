@@ -117,17 +117,10 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
-      - name: Check formatting
-        # One clang-format version for every leg, pip-pinned to the one the tree is
-        # formatted with locally: the DDK images bundle a different clang-format per
-        # KMI, and the oldest ones reject scripts/.clang-format's InheritParentConfig.
-        # The checkout is owned by a different user than the job: without
-        # safe.directory git refuses it, the enumeration comes back empty, and this
-        # step used to report OK on checking nothing.
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          pip3 install -q clang-format==21.1.8
-          CLANG_FORMAT="python3 -m clang_format" bash scripts/check-format.sh
+      # Formatting is checked once, in the dedicated `format` job: the DDK
+      # containers bundle a different clang-format per KMI (the oldest reject
+      # scripts/.clang-format), their python lacks pip, and a copy here used
+      # to check zero files and report OK.
       - name: Build
         run: |
           set -euo pipefail
@@ -222,6 +215,23 @@ jobs:
         run: bash scripts/run-hosttest.sh
       - name: Production netlink handlers
         run: python3 scripts/test-netlink-flow.py
+
+  format:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Formatting is a property of the whole tree, not of a KMI: one job with
+      # one pip-pinned clang-format instead of a copy inside each DDK
+      # container, whose images carry a different clang-format per KMI and
+      # whose oldest ones reject scripts/.clang-format's InheritParentConfig.
+      # (The per-container copy used to check zero files and report OK: the
+      # runner's git distrusts the root-owned checkout, and the failed
+      # enumeration degraded silently until the script started refusing it.)
+      - name: Run the format check
+        run: |
+          pip3 install -q clang-format==21.1.8
+          CLANG_FORMAT="python3 -m clang_format" bash scripts/check-format.sh
 
   diagnostics:
     name: permanent diagnostics (android14-6.1)
@@ -361,7 +371,7 @@ jobs:
   package:
     name: module zip
     runs-on: ubuntu-latest
-    needs: [lkm, host-build, host-test, diagnostics]
+    needs: [lkm, host-build, host-test, diagnostics, format]
     # always(), because lkm carries one too: a job that runs under always() does
     # not report "success", so the implicit success check an if without always()
     # brings with it would skip this job on every single run. Matrix legs use
