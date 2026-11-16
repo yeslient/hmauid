@@ -231,7 +231,11 @@ jobs:
       - name: Run the format check
         run: |
           pip3 install -q clang-format==21.1.8
-          CLANG_FORMAT="python3 -m clang_format" bash scripts/check-format.sh
+          # The pip wheel drops its clang-format binary into /usr/local/bin,
+          # which the runner PATH prefers over /usr/bin: plain clang-format
+          # below is the pinned one. (python3 -m clang_format does not work:
+          # the package has no __main__.)
+          bash scripts/check-format.sh
 
   diagnostics:
     name: permanent diagnostics (android14-6.1)
