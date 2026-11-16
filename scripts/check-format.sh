@@ -15,8 +15,29 @@ note() {
   fail=1
 }
 
+# ---- enumeration ----------------------------------------------------------
+# The three sections below enumerate tracked files with git ls-files. A failed
+# git (a runner that distrusts the checkout) or a wrong working directory used
+# to degrade silently into an empty set, and the check reported OK on checking
+# nothing -- every list is checked for both, and either aborts the run.
+tracked() {
+  local list
+  list=$(git ls-files "$@") || {
+    echo "  git ls-files failed; refusing to check an unknown set" >&2
+    exit 1
+  }
+  if [ -z "$list" ]; then
+    echo "  tracked-file enumeration came back empty; refusing" >&2
+    exit 1
+  fi
+  printf '%s\n' "$list"
+}
+
 # ---- C and C++ ------------------------------------------------------------
-mapfile -t cxx < <(git ls-files '*.c' '*.cc' '*.cpp' '*.h' '*.hpp')
+# Command substitution, not process substitution: a failing enumeration has to
+# fail the script, and mapfile cannot see an exit status across <(...).
+cxx_list=$(tracked '*.c' '*.cc' '*.cpp' '*.h' '*.hpp')
+mapfile -t cxx <<< "$cxx_list"
 echo "clang-format: ${#cxx[@]} files"
 if ! diff=$(clang-format --dry-run -Werror "${cxx[@]}" 2>&1); then
   printf '%s\n' "$diff" | sed 's/^/  /'
@@ -24,7 +45,8 @@ if ! diff=$(clang-format --dry-run -Werror "${cxx[@]}" 2>&1); then
 fi
 
 # ---- whitespace and line endings -----------------------------------------
-mapfile -t text < <(git ls-files | grep -vE '\.(png|jpg|gif|zip|ko|apk|jar|so)$')
+text_list=$(tracked | grep -vE '\.(png|jpg|gif|zip|ko|apk|jar|so)$')
+mapfile -t text <<< "$text_list"
 echo "whitespace: ${#text[@]} files"
 for f in "${text[@]}"; do
   [ -f "$f" ] || continue # gitlinks name directories, not project text files
@@ -47,7 +69,8 @@ for f in "${text[@]}"; do
 done
 
 # ---- shell ---------------------------------------------------------------
-mapfile -t sh < <(git ls-files '*.sh')
+sh_list=$(tracked '*.sh')
+mapfile -t sh <<< "$sh_list"
 echo "shell: ${#sh[@]} files"
 for f in "${sh[@]}"; do bash -n "$f" || note "$f: syntax"; done
 
